@@ -17,9 +17,16 @@ def make_record(version=1, state=None, updated_at=100.0):
     )
 
 
-@pytest.fixture(params=["sqlite"])
+@pytest.fixture(params=["sqlite", "redis"])
 def backend(request, tmp_path):
-    b = SQLiteBackend(str(tmp_path / "s.db"))
+    if request.param == "sqlite":
+        b = SQLiteBackend(str(tmp_path / "s.db"))
+    else:
+        import fakeredis
+
+        from mcpstate.backends.redis import RedisBackend
+
+        b = RedisBackend(fakeredis.FakeRedis())
     yield b
     b.close()
 
