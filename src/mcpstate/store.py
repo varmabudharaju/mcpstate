@@ -28,8 +28,12 @@ def _redact(url: str) -> str:
     return _CREDENTIALS_RE.sub("://***@", url)
 
 
+def _dt_req(ts: float) -> datetime:
+    return datetime.fromtimestamp(ts, tz=timezone.utc)
+
+
 def _dt(ts: float | None) -> datetime | None:
-    return None if ts is None else datetime.fromtimestamp(ts, tz=timezone.utc)
+    return None if ts is None else _dt_req(ts)
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -75,8 +79,8 @@ def _snapshot(handle: str, rec: Record) -> Snapshot:
         handle=handle,
         kind=rec.kind,
         version=rec.version,
-        created_at=_dt(rec.created_at),
-        updated_at=_dt(rec.updated_at),
+        created_at=_dt_req(rec.created_at),
+        updated_at=_dt_req(rec.updated_at),
         expires_at=_dt(rec.expires_at),
         last_writer=rec.last_writer,
         state=rec.state,
@@ -285,8 +289,8 @@ class HandleStore:
                     handle=handle,
                     kind=rec.kind,
                     version=rec.version,
-                    created_at=_dt(rec.created_at),
-                    updated_at=_dt(rec.updated_at),
+                    created_at=_dt_req(rec.created_at),
+                    updated_at=_dt_req(rec.updated_at),
                     expires_at=_dt(rec.expires_at),
                     last_writer=rec.last_writer,
                 )

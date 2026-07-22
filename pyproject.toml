@@ -30,6 +30,7 @@ dev = [
   "redis>=5",
   "fastmcp>=2.9",
   "ruff>=0.4",
+  "mypy>=1.10",
 ]
 
 [project.scripts]
@@ -47,3 +48,9 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.mypy]
+strict = false
+check_untyped_defs = true
+warn_unused_ignores = true
+files = ["src/mcpstate"]
