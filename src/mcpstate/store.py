@@ -137,5 +137,48 @@ class HandleStore:
         """Load current state with freshness metadata."""
         return _snapshot(handle, self._load_live(user, handle))
 
+    def save(
+        self,
+        handle: str,
+        state: dict,
+        *,
+        user: str,
+        expect_version: int,
+        writer: str | None = None,
+    ) -> Snapshot:
+        """Replace the state, declaring which version was read.
+
+        A stale ``expect_version`` raises :class:`StaleWrite` whose payload
+        carries the full current snapshot — hand it to the model to merge and
+        retry.
+        """
+        if not isinstance(state, dict):
+            raise ValueError(
+                f"State root must be a JSON object (dict), got {type(state).__name__}"
+            )
+        current = self._load_live(user, handle)
+        new = Record(
+            kind=current.kind,
+            state=state,
+            version=expect_version + 1,
+            created_at=current.created_at,
+            updated_at=self._clock(),
+            expires_at=current.expires_at,
+            last_writer=writer,
+        )
+        if current.version != expect_version or not self._backend.cas_put(
+            user, handle, expect_version, new
+        ):
+            latest = _snapshot(handle, self._load_live(user, handle))
+            raise StaleWrite(
+                f"State was modified by '{latest.last_writer or 'another session'}' at "
+                f"{_iso(latest.updated_at)} (now version {latest.version}, you expected "
+                f"{expect_version}). Re-read the current state below and re-apply your "
+                "change on top of it.",
+                current=latest.to_dict(),
+                expected_version=expect_version,
+            )
+        return _snapshot(handle, new)
+
     def close(self) -> None:
         self._backend.close()

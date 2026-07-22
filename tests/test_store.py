@@ -64,3 +64,46 @@ def test_invalid_kind_rejected(store):
 def test_non_dict_state_rejected(store):
     with pytest.raises(ValueError):
         store.mint("note", ["not", "a", "dict"], user="u")
+
+
+# --- versioned save -----------------------------------------------------------
+from mcpstate.errors import StaleWrite  # noqa: E402
+
+
+def test_save_with_matching_version_increments(store):
+    h = store.mint("note", {"n": 1}, user="u")
+    snap = store.save(h, {"n": 2}, user="u", expect_version=1, writer="phone")
+    assert snap.version == 2 and snap.state == {"n": 2} and snap.last_writer == "phone"
+    assert store.get(h, user="u").state == {"n": 2}
+
+
+def test_stale_save_rejected_with_current_state_in_payload(store):
+    h = store.mint("note", {"n": 1}, user="u")
+    store.save(h, {"n": 2}, user="u", expect_version=1, writer="laptop")
+    with pytest.raises(StaleWrite) as exc:
+        store.save(h, {"n": 99}, user="u", expect_version=1, writer="phone")
+    payload = exc.value.to_payload()
+    assert payload["current"]["version"] == 2
+    assert payload["current"]["state"] == {"n": 2}
+    assert payload["current"]["last_writer"] == "laptop"
+    assert payload["expected_version"] == 1
+    assert "re-read" in payload["message"].lower() or "re-apply" in payload["message"].lower()
+    assert store.get(h, user="u").state == {"n": 2}  # loser did not clobber
+
+
+def test_save_preserves_created_at_and_ttl(store, clockbox):
+    h = store.mint("note", {}, user="u", ttl_days=7)
+    created = store.get(h, user="u").created_at
+    clockbox.now += 100
+    snap = store.save(h, {"x": 1}, user="u", expect_version=1)
+    assert snap.created_at == created
+    assert snap.expires_at is not None
+
+
+def test_save_on_missing_and_expired(store, clockbox):
+    with pytest.raises(HandleNotFound):
+        store.save("note_zzzzzzzz", {}, user="u", expect_version=1)
+    h = store.mint("note", {}, user="u", ttl_days=1)
+    clockbox.now += 2 * 86400
+    with pytest.raises(HandleExpired):
+        store.save(h, {}, user="u", expect_version=1)
