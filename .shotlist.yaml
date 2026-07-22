@@ -24,7 +24,8 @@ shots:
   - name: use-case
     kind: session
     clear_between: true
-    cols: 100
+    cols: 96
+    rows: 15
     steps:
       - name: 1-start
         command: "rm -rf .demo; python3 examples/research_assistant.py start"
