@@ -237,6 +237,15 @@ for a model to read: `stale_write` includes the full current snapshot;
 `handle_expired` is distinguished from `handle_not_found` and says when it
 expired and what the TTL was.
 
+## See it work
+
+A real, captioned walkthrough of the headline use case — a research assistant
+that remembers across conversations and merges concurrent edits — is in
+**[docs/use-case.md](docs/use-case.md)**, driven by
+[`examples/research_assistant.py`](examples/research_assistant.py). Every step
+runs through the actual MCP tools in a separate process, so the persistence is
+genuine.
+
 ## Design notes
 
 Read [docs/concepts.md](docs/concepts.md) for the full conceptual story:

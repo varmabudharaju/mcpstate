@@ -1,8 +1,8 @@
 {
   "schema_version": "1",
-  "generated_at": "2026-07-22T23:00:15Z",
+  "generated_at": "2026-07-22T23:10:38Z",
   "config": ".shotlist.yaml",
-  "shot_count": 4,
+  "shot_count": 6,
   "shots": [
     {
       "index": 1,
@@ -20,28 +20,48 @@
       "kind": "cli",
       "alt": "full pytest suite green",
       "file": "02-test-suite.png",
-      "bytes": 8032,
-      "sha256": "81a400e59735ba10ff81285d3b31296564ab0314d65c7f452f470815fb5c8123",
+      "bytes": 7985,
+      "sha256": "8bed016e9a0637030f6becb0fbee95d547df10f8f4fc5d20cf93ee0fc163c1c7",
       "deterministic": true
     },
     {
       "index": 3,
-      "name": "session-one-mints",
+      "name": "1-start",
       "kind": "session",
-      "alt": "Session 1 mints a research handle and saves state",
-      "file": "03-session-one-mints.png",
-      "bytes": 168911,
-      "sha256": "57631ff48ac39d064e955a2ccb205a2893a3bbfd2476db304642cda564e20e2f",
+      "alt": "Conversation 1: the assistant starts durable research and mints a handle",
+      "file": "03-1-start.png",
+      "bytes": 186661,
+      "sha256": "c61a095fc4b623988f259316ed6190e8a34240a6cae405b5cb2379b292386068",
       "deterministic": false
     },
     {
       "index": 4,
-      "name": "session-two-resumes",
+      "name": "2-collect",
       "kind": "session",
-      "alt": "A separate process lists and resumes the same state - the hand-off",
-      "file": "04-session-two-resumes.png",
-      "bytes": 178542,
-      "sha256": "4e71512c6adca8d9b59e863fb7f9e261655cdaaac56740ef6cf9ad78bb80b64e",
+      "alt": "Still conversation 1: two sources appended via commutative patches",
+      "file": "04-2-collect.png",
+      "bytes": 209848,
+      "sha256": "86112b812539edf564d7970545994e53951352f8d7f721cf813b948867610d5e",
+      "deterministic": false
+    },
+    {
+      "index": 5,
+      "name": "3-resume",
+      "kind": "session",
+      "alt": "Conversation 2, a brand-new chat: the assistant recovers the full research state",
+      "file": "05-3-resume.png",
+      "bytes": 231130,
+      "sha256": "9f5aeacb6b6e98e539a5d169c33537fcefc5c5340ddce9017d0613889a3796b9",
+      "deterministic": false
+    },
+    {
+      "index": 6,
+      "name": "4-conflict",
+      "kind": "session",
+      "alt": "Two devices editing at once: the conflict becomes an agent-mergeable state, no write lost",
+      "file": "06-4-conflict.png",
+      "bytes": 237362,
+      "sha256": "2ac393c90fbdd24f01aa491dcdc14dcd2fdc83dbf9008ac9bfca1f44696c1b1b",
       "deterministic": false
     }
   ]

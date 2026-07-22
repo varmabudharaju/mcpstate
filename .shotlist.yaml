@@ -19,13 +19,22 @@ shots:
     rows: 8
     alt: "full pytest suite green"
 
-  - name: hand-off-demo
+  # The headline use case, played through the real MCP tools. Each step is a
+  # separate OS process sharing one SQLite file, so persistence is genuine.
+  - name: use-case
     kind: session
     clear_between: true
+    cols: 100
     steps:
-      - name: session-one-mints
-        command: "python3 -c \"from mcpstate import HandleStore; s = HandleStore.from_url('sqlite:///demo-state.db'); h = s.mint('research', {'sources': ['arxiv/2401.00001'], 'notes': 'phase 1 done'}, user='varma'); open('demo-handle.txt', 'w').write(h); print('session 1 minted:', h)\""
-        alt: "Session 1 mints a research handle and saves state"
-      - name: session-two-resumes
-        command: "python3 -c \"from mcpstate import HandleStore; h = open('demo-handle.txt').read(); s = HandleStore.from_url('sqlite:///demo-state.db'); print('session 2 sees handles:', [i.handle for i in s.list('varma')]); print('session 2 resumed state:', s.get(h, user='varma').state)\""
-        alt: "A separate process lists and resumes the same state - the hand-off"
+      - name: 1-start
+        command: "rm -rf .demo; python3 examples/research_assistant.py start"
+        alt: "Conversation 1: the assistant starts durable research and mints a handle"
+      - name: 2-collect
+        command: "python3 examples/research_assistant.py source 'https://developer.arm.com/documentation/'; python3 examples/research_assistant.py source 'https://aws.amazon.com/ec2/graviton/'"
+        alt: "Still conversation 1: two sources appended via commutative patches"
+      - name: 3-resume
+        command: "python3 examples/research_assistant.py resume"
+        alt: "Conversation 2, a brand-new chat: the assistant recovers the full research state"
+      - name: 4-conflict
+        command: "python3 examples/research_assistant.py conflict"
+        alt: "Two devices editing at once: the conflict becomes an agent-mergeable state, no write lost"
