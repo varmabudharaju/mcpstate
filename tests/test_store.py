@@ -107,3 +107,50 @@ def test_save_on_missing_and_expired(store, clockbox):
     clockbox.now += 2 * 86400
     with pytest.raises(HandleExpired):
         store.save(h, {}, user="u", expect_version=1)
+
+
+# --- patch / list / revoke / sweep --------------------------------------------
+from mcpstate.ops import Append  # noqa: E402
+
+
+def test_patch_applies_without_version(store):
+    h = store.mint("research", {"sources": []}, user="u")
+    store.save(h, {"sources": ["a"]}, user="u", expect_version=1)
+    snap = store.patch(h, [Append("sources", "b")], user="u", writer="phone")
+    assert snap.state["sources"] == ["a", "b"] and snap.version == 3
+
+
+def test_list_returns_metadata_without_state(store, clockbox):
+    h1 = store.mint("research", {"big": "blob"}, user="u")
+    clockbox.now += 10
+    h2 = store.mint("note", {}, user="u")
+    infos = store.list("u")
+    assert [i.handle for i in infos] == [h2, h1]
+    assert not hasattr(infos[0], "state")
+    assert store.list("u", kind="note")[0].handle == h2
+
+
+def test_list_hides_expired_unless_asked(store, clockbox):
+    h = store.mint("note", {}, user="u", ttl_days=1)
+    store.mint("note", {}, user="u")
+    clockbox.now += 2 * 86400
+    assert len(store.list("u")) == 1
+    assert len(store.list("u", include_expired=True)) == 2
+    assert h in {i.handle for i in store.list("u", include_expired=True)}
+
+
+def test_revoke_deletes_and_errors_on_missing(store):
+    h = store.mint("note", {}, user="u")
+    store.revoke(h, user="u")
+    with pytest.raises(HandleNotFound):
+        store.get(h, user="u")
+    with pytest.raises(HandleNotFound):
+        store.revoke(h, user="u")
+
+
+def test_sweep_removes_only_expired(store, clockbox):
+    store.mint("note", {}, user="u", ttl_days=1)
+    keep = store.mint("note", {}, user="u")
+    clockbox.now += 2 * 86400
+    assert store.sweep("u") == 1
+    assert [i.handle for i in store.list("u", include_expired=True)] == [keep]

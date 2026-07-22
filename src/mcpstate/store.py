@@ -180,5 +180,82 @@ class HandleStore:
             )
         return _snapshot(handle, new)
 
+    def patch(
+        self,
+        handle: str,
+        ops: Sequence[PatchOp],
+        *,
+        user: str,
+        writer: str | None = None,
+    ) -> Snapshot:
+        """Apply commutative ops with no version check — they cannot conflict.
+
+        Internally a bounded CAS retry loop: contention re-reads and re-applies,
+        so concurrent patches from different sessions all land.
+        """
+        for _ in range(20):
+            current = self._load_live(user, handle)
+            new_state = apply_ops(current.state, ops)
+            new = Record(
+                kind=current.kind,
+                state=new_state,
+                version=current.version + 1,
+                created_at=current.created_at,
+                updated_at=self._clock(),
+                expires_at=current.expires_at,
+                last_writer=writer,
+            )
+            if self._backend.cas_put(user, handle, current.version, new):
+                return _snapshot(handle, new)
+        raise BackendError(
+            f"Patch on '{handle}' failed after 20 attempts under write contention.",
+            handle=handle,
+        )
+
+    def list(
+        self,
+        user: str,
+        *,
+        kind: str | None = None,
+        include_expired: bool = False,
+    ) -> list[HandleInfo]:
+        """The user's handles — metadata only, most recently updated first."""
+        now = self._clock()
+        infos = []
+        for handle, rec in self._backend.list(user):
+            if kind is not None and rec.kind != kind:
+                continue
+            if not include_expired and rec.expires_at is not None and rec.expires_at <= now:
+                continue
+            infos.append(
+                HandleInfo(
+                    handle=handle,
+                    kind=rec.kind,
+                    version=rec.version,
+                    created_at=_dt(rec.created_at),
+                    updated_at=_dt(rec.updated_at),
+                    expires_at=_dt(rec.expires_at),
+                    last_writer=rec.last_writer,
+                )
+            )
+        return infos
+
+    def revoke(self, handle: str, *, user: str) -> None:
+        """Delete the handle and its state (expired handles may be revoked too)."""
+        if not self._backend.delete(user, handle):
+            raise HandleNotFound(
+                f"No state exists for handle '{handle}'; nothing to revoke.", handle=handle
+            )
+
+    def sweep(self, user: str) -> int:
+        """Physically remove the user's expired records; return how many."""
+        now = self._clock()
+        removed = 0
+        for handle, rec in self._backend.list(user):
+            if rec.expires_at is not None and rec.expires_at <= now:
+                if self._backend.delete(user, handle):
+                    removed += 1
+        return removed
+
     def close(self) -> None:
         self._backend.close()
