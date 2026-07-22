@@ -1,6 +1,6 @@
 {
   "schema_version": "1",
-  "generated_at": "2026-07-22T22:20:24Z",
+  "generated_at": "2026-07-22T23:00:15Z",
   "config": ".shotlist.yaml",
   "shot_count": 4,
   "shots": [
@@ -20,8 +20,8 @@
       "kind": "cli",
       "alt": "full pytest suite green",
       "file": "02-test-suite.png",
-      "bytes": 7036,
-      "sha256": "94dbc818adeadf6f130ac4210051a9b416e458a333081bed0bfba7d137dd78b2",
+      "bytes": 8032,
+      "sha256": "81a400e59735ba10ff81285d3b31296564ab0314d65c7f452f470815fb5c8123",
       "deterministic": true
     },
     {
@@ -30,8 +30,8 @@
       "kind": "session",
       "alt": "Session 1 mints a research handle and saves state",
       "file": "03-session-one-mints.png",
-      "bytes": 168551,
-      "sha256": "ea348fa3e505517ef79277f1d39c10006a44be14ba3a6cf78f5b808a018d2613",
+      "bytes": 168911,
+      "sha256": "57631ff48ac39d064e955a2ccb205a2893a3bbfd2476db304642cda564e20e2f",
       "deterministic": false
     },
     {
@@ -40,8 +40,8 @@
       "kind": "session",
       "alt": "A separate process lists and resumes the same state - the hand-off",
       "file": "04-session-two-resumes.png",
-      "bytes": 177764,
-      "sha256": "af54756273f749eff7e5ca4120440b812fd81b3a5a1d36fc123fa237b71a3c31",
+      "bytes": 178542,
+      "sha256": "4e71512c6adca8d9b59e863fb7f9e261655cdaaac56740ef6cf9ad78bb80b64e",
       "deterministic": false
     }
   ]
