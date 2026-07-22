@@ -36,7 +36,9 @@ class SQLiteBackend:
             p.parent.mkdir(parents=True, exist_ok=True)
             path = str(p)
         self._lock = threading.Lock()
-        self._conn = sqlite3.connect(path, check_same_thread=False)
+        # timeout doubles as the busy handler: a second process writing the same
+        # DB (the cross-client axis) waits up to 10s instead of erroring.
+        self._conn = sqlite3.connect(path, check_same_thread=False, timeout=10.0)
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute(_SCHEMA)

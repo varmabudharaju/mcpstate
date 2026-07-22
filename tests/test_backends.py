@@ -75,3 +75,29 @@ def test_list_orders_by_updated_at_desc(backend):
     backend.put_new("u", "old", make_record(updated_at=50.0))
     backend.put_new("u", "new", make_record(updated_at=150.0))
     assert [h for h, _ in backend.list("u")] == ["new", "old"]
+
+
+def test_sqlite_sets_busy_timeout(tmp_path):
+    b = SQLiteBackend(str(tmp_path / "t.db"))
+    timeout = b._conn.execute("PRAGMA busy_timeout").fetchone()[0]
+    b.close()
+    assert timeout >= 5000
+
+
+def test_redis_keys_survive_hostile_user_and_handle_strings():
+    import fakeredis
+
+    from mcpstate.backends.redis import RedisBackend
+
+    b = RedisBackend(fakeredis.FakeRedis())
+    # A user id containing colons must not collide with another user's index set
+    # or another (user, handle) split point.
+    b.put_new("index:foo", "note_aaaa2222", make_record(state={"who": "hostile"}))
+    b.put_new("foo", "note_bbbb2222", make_record(state={"who": "victim"}))
+    assert b.get("foo", "note_bbbb2222").state == {"who": "victim"}
+    assert b.get("index:foo", "note_aaaa2222").state == {"who": "hostile"}
+    assert [h for h, _ in b.list("foo")] == ["note_bbbb2222"]
+    assert [h for h, _ in b.list("index:foo")] == ["note_aaaa2222"]
+    # And the raw colon-joined form must NOT be addressable as anyone else's data.
+    assert b.get("index", "foo:note_aaaa2222") is None
+    b.close()
