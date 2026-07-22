@@ -1,7 +1,7 @@
 """Regression tests for the post-review hardening pass."""
 import pytest
 
-from mcpstate import Append, HandleStore, SetKey, StateTooLarge
+from mcpstate import Append, HandleStore, SetKey
 from mcpstate.backends.sqlite import SQLiteBackend
 from mcpstate.errors import PatchError
 from mcpstate.ops import op_from_dict
@@ -67,28 +67,31 @@ def test_op_from_dict_rejects_malformed_ops():
             op_from_dict(bad)
 
 
-def test_deeply_nested_patch_is_clean_error_not_crash(store):
-    import inspect
-    import sys
+def test_recursion_in_serialization_becomes_clean_error(store, monkeypatch):
+    # A RecursionError while serializing state (e.g. a pathologically nested
+    # structure) must surface as a clean ValueError, never an unhandled crash.
+    import mcpstate.store as store_mod
+
+    def boom(*a, **k):
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(store_mod.json, "dumps", boom)
+    with pytest.raises(ValueError, match="deeply nested"):
+        store.mint("deep", {"a": 1}, user="u")
+
+
+def test_recursion_in_patch_apply_becomes_clean_patch_error(store, monkeypatch):
+    # A RecursionError while applying ops must surface as a PatchError.
+    import mcpstate.store as store_mod
 
     h = store.mint("deep", {"a": {}}, user="u")
-    ops = []
-    path = "a"
-    for _ in range(2000):
-        ops.append(SetKey(path, "a", {}))
-        path += ".a"
-    # Force the recursion path deterministically across platforms (Linux CI has
-    # more stack than macOS): cap the limit just above the current stack depth,
-    # so the 2000-deep deepcopy overflows but pytest's own frames stay safe. The
-    # guarantee is that RecursionError becomes a clean error, never a crash.
-    depth = len(inspect.stack())
-    original = sys.getrecursionlimit()
-    sys.setrecursionlimit(depth + 200)
-    try:
-        with pytest.raises((PatchError, StateTooLarge, ValueError)):
-            store.patch(h, ops, user="u")
-    finally:
-        sys.setrecursionlimit(original)
+
+    def boom(*a, **k):
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(store_mod, "apply_ops", boom)
+    with pytest.raises(PatchError):
+        store.patch(h, [SetKey("", "x", 1)], user="u")
     assert store.get(h, user="u").state == {"a": {}}  # original intact
 
 
