@@ -77,9 +77,34 @@ def _snapshot(handle: str, rec: Record) -> Snapshot:
 
 
 class HandleStore:
+    DEFAULT_URL = "sqlite:///~/.mcpstate/state.db"
+
     def __init__(self, backend: Backend, *, clock: Callable[[], float] = time.time) -> None:
         self._backend = backend
         self._clock = clock
+
+    @classmethod
+    def from_url(cls, url: str | None = None) -> "HandleStore":
+        """Construct from a backend URL; None selects the local SQLite default."""
+        url = url or cls.DEFAULT_URL
+        if url.startswith("sqlite:///"):
+            from .backends.sqlite import SQLiteBackend
+
+            return cls(SQLiteBackend(url[len("sqlite:///"):]))
+        if url.startswith(("redis://", "rediss://")):
+            try:
+                import redis
+            except ImportError:
+                raise BackendError(
+                    'Redis backend requires the redis package: pip install "mcpstate[redis]"',
+                    url=url,
+                ) from None
+            from .backends.redis import RedisBackend
+
+            return cls(RedisBackend(redis.Redis.from_url(url)))
+        raise ValueError(
+            f"Unsupported backend URL {url!r}. Supported: sqlite:///path, redis://host[:port]/db"
+        )
 
     def _load_live(self, user: str, handle: str) -> Record:
         rec = self._backend.get(user, handle)
