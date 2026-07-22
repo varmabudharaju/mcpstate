@@ -114,3 +114,38 @@ def state_delete(handle: str) -> dict:
         return {"ok": True, "handle": handle, "deleted": True}
     except McpStateError as err:
         return _fail(err)
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+    import os
+
+    from . import __version__
+
+    parser = argparse.ArgumentParser(
+        prog="mcpstate",
+        description="Durable, user-keyed state for stateless MCP servers.",
+    )
+    parser.add_argument("--version", action="store_true", help="print version and exit")
+    sub = parser.add_subparsers(dest="command")
+    serve = sub.add_parser("serve", help="run the mcpstate MCP server")
+    serve.add_argument("--backend", help="backend URL (sqlite:///path or redis://...)")
+    serve.add_argument("--transport", choices=["stdio", "http"], default="stdio")
+    serve.add_argument("--port", type=int, default=8000)
+
+    args = parser.parse_args(argv)
+    if args.version:
+        print(__version__)
+        return 0
+    if args.command == "serve":
+        if args.backend:
+            os.environ["MCPSTATE_BACKEND"] = args.backend
+        global _store
+        _store = None
+        if args.transport == "http":
+            mcp.run(transport="http", port=args.port)
+        else:
+            mcp.run()
+        return 0
+    parser.print_help()
+    return 0
