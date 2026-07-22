@@ -73,3 +73,13 @@ async def test_flagship_writes_carry_writer_label(monkeypatch):
     patched = await call("state_patch", handle=minted["handle"],
                          ops=[{"op": "merge", "mapping": {"m": True}}])
     assert patched["last_writer"] == "test-device/claude"
+
+
+async def test_state_load_selective_path():
+    minted = await call("state_save", kind="research",
+                        state={"sources": ["a", "b"], "notes": {"draft": "long text"}})
+    partial = await call("state_load", handle=minted["handle"], path="sources")
+    assert partial["ok"] and partial["state"] == ["a", "b"]
+    assert partial["path"] == "sources"
+    bad = await call("state_load", handle=minted["handle"], path="nope.deep")
+    assert bad["ok"] is False and bad["error"]["code"] == "patch_error"

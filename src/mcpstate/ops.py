@@ -103,6 +103,11 @@ def _apply_one(state: dict, op: PatchOp) -> None:
         raise PatchError(f"Unknown op {op!r}", op=str(op), reason="unknown_op")
 
 
+def get_path(state: dict, path: str) -> Any:
+    """Select the subtree at a dotted ``path`` (``""`` returns the whole state)."""
+    return _resolve(state, path, "load")
+
+
 def apply_ops(state: dict, ops: Sequence[PatchOp]) -> dict:
     """Return a new state with every op applied. The input is never mutated."""
     out = copy.deepcopy(state)

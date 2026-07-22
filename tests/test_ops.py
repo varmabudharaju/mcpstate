@@ -42,3 +42,14 @@ def test_op_from_dict_round_trip():
     assert op_from_dict({"op": "merge", "mapping": {"x": 1}}) == Merge({"x": 1})
     with pytest.raises(PatchError):
         op_from_dict({"op": "explode"})
+
+
+def test_get_path_selects_subtree_and_root():
+    from mcpstate.ops import get_path
+
+    state = {"profile": {"tags": {"a": 1}}, "sources": [1, 2]}
+    assert get_path(state, "profile.tags") == {"a": 1}
+    assert get_path(state, "sources") == [1, 2]
+    assert get_path(state, "") == state
+    with pytest.raises(PatchError):
+        get_path(state, "missing.path")

@@ -11,7 +11,7 @@ from fastmcp import FastMCP
 
 from .errors import McpStateError
 from .fastmcp import current_user, current_writer, store_from_env
-from .ops import op_from_dict
+from .ops import get_path, op_from_dict
 from .store import HandleStore
 
 mcp = FastMCP("mcpstate")
@@ -67,12 +67,18 @@ def state_save(
 
 
 @mcp.tool
-def state_load(handle: str) -> dict:
+def state_load(handle: str, path: str | None = None) -> dict:
     """Load durable state by handle. Returns the state plus freshness metadata
-    (version, updated_at, last_writer) — keep the version for your next state_save."""
+    (version, updated_at, last_writer) — keep the version for your next state_save.
+    For large states, pass `path` (dotted, e.g. "sources" or "profile.tags") to
+    load just that subtree instead of the whole state."""
     try:
         snap = _get_store().get(handle, user=current_user())
-        return {"ok": True, **snap.to_dict()}
+        payload = {"ok": True, **snap.to_dict()}
+        if path:
+            payload["state"] = get_path(snap.state, path)
+            payload["path"] = path
+        return payload
     except McpStateError as err:
         return _fail(err)
 
