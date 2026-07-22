@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mcpstate"
+version = "0.1.0"
+description = "Durable, user-keyed state for stateless MCP servers — handles, hand-off sync, agent-mediated conflict resolution."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "Varma Budharaju" }]
+keywords = ["mcp", "model-context-protocol", "state", "session", "sync", "agents"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries",
+]
+dependencies = []
+
+[project.optional-dependencies]
+redis = ["redis>=5"]
+fastmcp = ["fastmcp>=2.9"]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+  "fakeredis>=2.23",
+  "redis>=5",
+  "fastmcp>=2.9",
+  "ruff>=0.4",
+]
+
+[project.scripts]
+mcpstate = "mcpstate.server:main"
+
+[project.urls]
+Homepage = "https://github.com/varmabudharaju/mcpstate"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcpstate"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
