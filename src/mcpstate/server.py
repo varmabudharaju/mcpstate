@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastmcp import FastMCP
 
 from .errors import McpStateError
-from .fastmcp import current_user, store_from_env
+from .fastmcp import current_user, current_writer, store_from_env
 from .ops import op_from_dict
 from .store import HandleStore
 
@@ -47,7 +47,8 @@ def state_save(
     user = current_user()
     try:
         if handle is None:
-            new_handle = store.mint(kind, state, user=user, ttl_days=ttl_days)
+            new_handle = store.mint(kind, state, user=user, ttl_days=ttl_days,
+                                    writer=current_writer())
             return {"ok": True, "handle": new_handle, "version": 1}
         if expect_version is None:
             return {
@@ -58,7 +59,8 @@ def state_save(
                     "pass the version from your last state_load or state_save.",
                 },
             }
-        snap = store.save(handle, state, user=user, expect_version=expect_version)
+        snap = store.save(handle, state, user=user, expect_version=expect_version,
+                          writer=current_writer())
         return {"ok": True, "handle": handle, "version": snap.version}
     except McpStateError as err:
         return _fail(err)
@@ -99,7 +101,7 @@ def state_patch(handle: str, ops: list[dict]) -> dict:
     Prefer patch over save for adding items — it never gets a stale_write."""
     try:
         parsed = [op_from_dict(o) for o in ops]
-        snap = _get_store().patch(handle, parsed, user=current_user())
+        snap = _get_store().patch(handle, parsed, user=current_user(), writer=current_writer())
         return {"ok": True, **snap.to_dict()}
     except McpStateError as err:
         return _fail(err)

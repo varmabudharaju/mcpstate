@@ -11,6 +11,20 @@ def store_from_env() -> HandleStore:
     return HandleStore.from_url(os.environ.get("MCPSTATE_BACKEND"))
 
 
+def current_writer() -> str:
+    """A label for who is writing, shown as last_writer in freshness metadata.
+
+    MCPSTATE_WRITER env (e.g. "laptop/claude-code") -> hostname fallback, so
+    cross-device hand-offs are attributable out of the box.
+    """
+    writer = os.environ.get("MCPSTATE_WRITER")
+    if writer:
+        return writer
+    import socket
+
+    return socket.gethostname()
+
+
 def current_user() -> str:
     """Resolve the state-scoping user for the current request.
 

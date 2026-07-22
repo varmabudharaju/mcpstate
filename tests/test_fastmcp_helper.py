@@ -17,3 +17,19 @@ def test_current_user_prefers_env_override(monkeypatch):
 def test_current_user_defaults_to_local(monkeypatch):
     monkeypatch.delenv("MCPSTATE_USER", raising=False)
     assert current_user() == "local"
+
+
+def test_current_writer_prefers_env(monkeypatch):
+    from mcpstate.fastmcp import current_writer
+
+    monkeypatch.setenv("MCPSTATE_WRITER", "laptop/claude-code")
+    assert current_writer() == "laptop/claude-code"
+
+
+def test_current_writer_defaults_to_hostname(monkeypatch):
+    import socket
+
+    from mcpstate.fastmcp import current_writer
+
+    monkeypatch.delenv("MCPSTATE_WRITER", raising=False)
+    assert current_writer() == socket.gethostname()

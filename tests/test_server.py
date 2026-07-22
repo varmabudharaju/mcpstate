@@ -61,3 +61,15 @@ async def test_load_list_patch_delete_round_trip():
     assert deleted["ok"]
     missing = await call("state_load", handle=h)
     assert missing["ok"] is False and missing["error"]["code"] == "handle_not_found"
+
+
+async def test_flagship_writes_carry_writer_label(monkeypatch):
+    monkeypatch.setenv("MCPSTATE_WRITER", "test-device/claude")
+    minted = await call("state_save", kind="note", state={"n": 1})
+    loaded = await call("state_load", handle=minted["handle"])
+    assert loaded["last_writer"] == "test-device/claude"
+    await call("state_save", kind="note", state={"n": 2},
+               handle=minted["handle"], expect_version=1)
+    patched = await call("state_patch", handle=minted["handle"],
+                         ops=[{"op": "merge", "mapping": {"m": True}}])
+    assert patched["last_writer"] == "test-device/claude"
