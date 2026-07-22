@@ -15,17 +15,42 @@ from datetime import datetime, timezone
 from typing import Callable, Sequence
 
 from .backends.base import Backend, Record
-from .errors import BackendError, HandleExpired, HandleNotFound, StaleWrite, StateTooLarge
+from .errors import (
+    BackendError,
+    HandleExpired,
+    HandleNotFound,
+    PatchError,
+    StaleWrite,
+    StateTooLarge,
+)
 from .ops import PatchOp, apply_ops
 
 _KIND_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz234567"
 _CREDENTIALS_RE = re.compile(r"://[^@/]*@")
+_MAX_TTL_DAYS = 36525  # ~100 years; keeps expires_at well inside the datetime range
+_PATCH_MAX_ATTEMPTS = 100  # with backoff, spurious failure is negligible even under load
 
 
 def _redact(url: str) -> str:
     """Strip userinfo (passwords) from a URL before it enters any error message."""
     return _CREDENTIALS_RE.sub("://***@", url)
+
+
+def _validate_ttl(ttl_days: float | None) -> float | None:
+    if ttl_days is None:
+        return None
+    if isinstance(ttl_days, bool) or not isinstance(ttl_days, (int, float)):
+        raise ValueError(f"ttl_days must be a number, got {type(ttl_days).__name__}")
+    import math
+
+    if not math.isfinite(ttl_days):
+        raise ValueError("ttl_days must be finite (not inf or nan)")
+    if ttl_days <= 0:
+        raise ValueError(f"ttl_days must be positive, got {ttl_days}")
+    if ttl_days > _MAX_TTL_DAYS:
+        raise ValueError(f"ttl_days must be <= {_MAX_TTL_DAYS} (~100 years), got {ttl_days}")
+    return ttl_days
 
 
 def _dt_req(ts: float) -> datetime:
@@ -108,9 +133,15 @@ class HandleStore:
                 f"State root must be a JSON object (dict), got {type(state).__name__}"
             )
         try:
-            size = len(json.dumps(state).encode())
+            # allow_nan=False rejects Infinity/NaN, which are invalid JSON and would
+            # otherwise persist as immortal, non-interoperable records.
+            size = len(json.dumps(state, allow_nan=False).encode())
         except (TypeError, ValueError) as exc:
             raise ValueError(f"State contains values that are not JSON-serializable: {exc}") from None
+        except RecursionError:
+            raise ValueError(
+                "State is too deeply nested to serialize. Flatten it or split the work."
+            ) from None
         if size > self._max_state_bytes:
             raise StateTooLarge(
                 f"State is {size} bytes; the limit is {self._max_state_bytes}. "
@@ -126,7 +157,12 @@ class HandleStore:
         if url.startswith("sqlite:///"):
             from .backends.sqlite import SQLiteBackend
 
-            return cls(SQLiteBackend(url[len("sqlite:///"):]))
+            path = url[len("sqlite:///"):]
+            if not path:
+                raise ValueError(
+                    "Empty sqlite path. Use sqlite:///path/to.db or sqlite:///:memory:"
+                )
+            return cls(SQLiteBackend(path))
         if url.startswith(("redis://", "rediss://")):
             try:
                 import redis
@@ -174,6 +210,7 @@ class HandleStore:
         """Create durable state and return its opaque handle."""
         if not _KIND_RE.match(kind):
             raise ValueError(f"Invalid kind {kind!r}: must match ^[a-z][a-z0-9-]{{0,31}}$")
+        ttl_days = _validate_ttl(ttl_days)
         self._check_state(state)
         now = self._clock()
         expires_at = None if ttl_days is None else now + ttl_days * 86400
@@ -225,7 +262,18 @@ class HandleStore:
         if current.version != expect_version or not self._backend.cas_put(
             user, handle, expect_version, new
         ):
-            latest = _snapshot(handle, self._load_live(user, handle))
+            # Re-read to attach the winner's state. The handle may have been
+            # revoked or expired in the race; surface that accurately rather
+            # than a StaleWrite with no current state to merge.
+            try:
+                latest = _snapshot(handle, self._load_live(user, handle))
+            except (HandleNotFound, HandleExpired):
+                raise HandleNotFound(
+                    f"The state for '{handle}' was deleted or expired while you were "
+                    "editing it, and your save (version "
+                    f"{expect_version}) did not apply. Start fresh with a new handle.",
+                    handle=handle,
+                ) from None
             raise StaleWrite(
                 f"State was modified by '{latest.last_writer or 'another session'}' at "
                 f"{_iso(latest.updated_at)} (now version {latest.version}, you expected "
@@ -246,12 +294,23 @@ class HandleStore:
     ) -> Snapshot:
         """Apply commutative ops with no version check — they cannot conflict.
 
-        Internally a bounded CAS retry loop: contention re-reads and re-applies,
-        so concurrent patches from different sessions all land.
+        A CAS retry loop with backoff: contention re-reads and re-applies, so
+        concurrent patches from different sessions all land. A patch that
+        produces no change is a no-op — it does not bump the version or
+        reassign the writer, so it never steals attribution or induces a
+        spurious StaleWrite for a concurrent save.
         """
-        for _ in range(20):
+        for attempt in range(_PATCH_MAX_ATTEMPTS):
             current = self._load_live(user, handle)
-            new_state = apply_ops(current.state, ops)
+            try:
+                new_state = apply_ops(current.state, ops)
+            except RecursionError:
+                raise PatchError(
+                    "Applying these ops produced state too deeply nested to store.",
+                    reason="too_deep",
+                ) from None
+            if new_state == current.state:
+                return _snapshot(handle, current)  # no-op: do not write
             self._check_state(new_state)
             new = Record(
                 kind=current.kind,
@@ -264,8 +323,11 @@ class HandleStore:
             )
             if self._backend.cas_put(user, handle, current.version, new):
                 return _snapshot(handle, new)
+            # Lost the race: back off briefly (bounded, attempt-scaled) and retry.
+            time.sleep(min(0.05, 0.0005 * (attempt + 1)))
         raise BackendError(
-            f"Patch on '{handle}' failed after 20 attempts under write contention.",
+            f"Patch on '{handle}' failed after {_PATCH_MAX_ATTEMPTS} attempts under "
+            "sustained write contention.",
             handle=handle,
         )
 

@@ -98,6 +98,12 @@ def _apply_one(state: dict, op: PatchOp) -> None:
             )
         target.pop(op.key, None)
     elif isinstance(op, Merge):
+        if not isinstance(op.mapping, dict):
+            raise PatchError(
+                f"merge needs an object mapping, got {type(op.mapping).__name__}.",
+                op="merge",
+                reason="expected_object",
+            )
         state.update(op.mapping)
     else:  # pragma: no cover - defensive
         raise PatchError(f"Unknown op {op!r}", op=str(op), reason="unknown_op")
@@ -116,17 +122,38 @@ def apply_ops(state: dict, ops: Sequence[PatchOp]) -> dict:
     return out
 
 
+def _require(value: object, typ: tuple, field: str, op_name: str) -> None:
+    if not isinstance(value, typ) or isinstance(value, bool) and bool not in typ:
+        names = " or ".join(t.__name__ for t in typ)
+        raise PatchError(
+            f"Op '{op_name}' field '{field}' must be {names}, got {type(value).__name__}.",
+            op=op_name,
+            reason="bad_field_type",
+        )
+
+
 def op_from_dict(d: dict) -> PatchOp:
     """Parse the wire form used by the flagship server's state_patch tool."""
+    if not isinstance(d, dict):
+        raise PatchError(
+            f"Each patch op must be an object, got {type(d).__name__}.",
+            reason="not_an_object",
+        )
     kind = d.get("op")
     try:
         if kind == "append":
+            _require(d["path"], (str,), "path", "append")
             return Append(d["path"], d["value"])
         if kind == "set_key":
+            _require(d["path"], (str,), "path", "set_key")
+            _require(d["key"], (str,), "key", "set_key")
             return SetKey(d["path"], d["key"], d["value"])
         if kind == "del_key":
+            _require(d["path"], (str,), "path", "del_key")
+            _require(d["key"], (str,), "key", "del_key")
             return DelKey(d["path"], d["key"])
         if kind == "merge":
+            _require(d["mapping"], (dict,), "mapping", "merge")
             return Merge(d["mapping"])
     except KeyError as missing:
         raise PatchError(

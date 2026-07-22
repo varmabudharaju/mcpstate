@@ -53,6 +53,18 @@ class StateTooLarge(McpStateError):
     code = "state_too_large"
 
 
+class Unauthenticated(McpStateError):
+    """No caller identity could be resolved on a transport that requires one."""
+
+    code = "unauthenticated"
+
+
+class InternalError(McpStateError):
+    """An unexpected failure; message is scrubbed of sensitive detail."""
+
+    code = "internal_error"
+
+
 class BackendError(McpStateError):
     """The storage backend failed or is misconfigured."""
 

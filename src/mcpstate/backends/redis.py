@@ -22,16 +22,18 @@ _PREFIX = "mcpstate"
 
 def _q(part: str) -> str:
     # Percent-encode so a user or handle containing ':' (an OAuth sub like
-    # "org:alice") cannot collide with the key layout or the index keyspace.
+    # "org:alice") cannot collide with the key layout.
     return quote(part, safe="")
 
 
+# Records and indexes live under disjoint prefixes ("h" vs "i") so no username
+# — even the literal "index" — can ever land in the index keyspace.
 def _key(user: str, handle: str) -> str:
-    return f"{_PREFIX}:{_q(user)}:{_q(handle)}"
+    return f"{_PREFIX}:h:{_q(user)}:{_q(handle)}"
 
 
 def _index(user: str) -> str:
-    return f"{_PREFIX}:index:{_q(user)}"
+    return f"{_PREFIX}:i:{_q(user)}"
 
 
 def _dump(record: Record) -> str:

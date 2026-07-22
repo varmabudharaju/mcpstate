@@ -10,6 +10,8 @@ from .errors import (
     PatchError,
     StaleWrite,
     StateTooLarge,
+    Unauthenticated,
+    InternalError,
 )
 from .ops import Append, DelKey, Merge, PatchOp, SetKey, apply_ops, op_from_dict
 from .store import HandleInfo, HandleStore, Snapshot
@@ -26,6 +28,8 @@ __all__ = [
     "StaleWrite",
     "PatchError",
     "StateTooLarge",
+    "Unauthenticated",
+    "InternalError",
     "BackendError",
     "Append",
     "SetKey",
