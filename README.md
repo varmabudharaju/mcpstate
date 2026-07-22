@@ -82,7 +82,7 @@ The server exposes five tools:
 | Tool | What the agent uses it for |
 |---|---|
 | `state_save` | Create durable state (mints a handle) or update it (versioned) |
-| `state_load` | Load state by handle, with freshness metadata |
+| `state_load` | Load state by handle (optionally just a subtree via `path`) |
 | `state_list` | "What was I working on?" — list this user's handles |
 | `state_patch` | Additive edits that can never conflict (append, set key, merge) |
 | `state_delete` | Permanently remove state |
@@ -186,12 +186,22 @@ flowchart TD
 | Setup | none | `pip install "mcpstate[redis]"` + a Redis |
 | Concurrency | atomic compare-and-swap via SQL | optimistic WATCH/MULTI transactions |
 
-Configuration is two environment variables:
+Configuration is three environment variables:
 
 - `MCPSTATE_BACKEND` — backend URL (or pass `--backend` to `mcpstate serve`).
 - `MCPSTATE_USER` — identity override for local/stdio use. Remote servers
   running with OAuth resolve the user from the access token instead; stdio
   servers default to `"local"`.
+- `MCPSTATE_WRITER` — the label recorded as `last_writer` on every write
+  (e.g. `laptop/claude-code`); defaults to the machine's hostname, so
+  cross-device hand-offs are attributable out of the box.
+
+Security defaults worth knowing: states are capped at 1 MiB
+(`HandleStore(max_state_bytes=...)` to change; oversized saves get a
+structured `state_too_large` error), credentials never appear in error
+messages, and `mcpstate serve --transport http` has no authentication of its
+own — keep it on localhost or behind an authenticating proxy; multi-user
+identity requires running under FastMCP OAuth.
 
 ## API reference
 
@@ -202,6 +212,7 @@ Configuration is two environment variables:
 | `from_url(url=None)` | Construct from a backend URL; `None` uses the SQLite default | `ValueError`, `BackendError` |
 | `mint(kind, state, *, user, ttl_days=None, writer=None) -> str` | Create state, return opaque handle `{kind}_{8 chars}` | `ValueError` |
 | `get(handle, *, user) -> Snapshot` | State + version + timestamps + last writer | `HandleNotFound`, `HandleExpired` |
+| `save`/`mint`/`patch` size guard | States over `max_state_bytes` (default 1 MiB) are rejected | `StateTooLarge` |
 | `save(handle, state, *, user, expect_version, writer=None) -> Snapshot` | Versioned full replace; returns the new snapshot | `StaleWrite`, `HandleNotFound`, `HandleExpired` |
 | `patch(handle, ops, *, user, writer=None) -> Snapshot` | Apply commutative ops; no version needed | `PatchError`, `HandleNotFound`, `HandleExpired` |
 | `list(user, *, kind=None, include_expired=False) -> list[HandleInfo]` | Metadata only, most recently updated first | — |

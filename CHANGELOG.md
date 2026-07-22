@@ -26,3 +26,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   library API; stdio and HTTP transports.
 - Documentation: README with architecture and conflict-flow diagrams,
   concepts guide (hand-off sync, the conflict ladder, honest limits).
+- Hardening: Redis keys percent-encoded against namespace collision from
+  hostile user/handle strings; credentials redacted from every error message;
+  early JSON-serializability validation; 1 MiB state size guard with
+  structured `state_too_large` error; explicit SQLite busy timeout for
+  multi-process use; writer attribution (`MCPSTATE_WRITER`/hostname) on all
+  flagship writes; selective `state_load(path=...)` subtree reads;
+  opportunistic expiry sweep during `state_list`; `py.typed` marker with a
+  clean mypy pass; CI (ruff, mypy, pytest on 3.11/3.12) and PyPI Trusted
+  Publishing workflows.
