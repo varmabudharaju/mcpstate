@@ -7,6 +7,7 @@
 [![CI](https://github.com/varmabudharaju/mcpstate/actions/workflows/ci.yml/badge.svg)](https://github.com/varmabudharaju/mcpstate/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)
+[![PyPI](https://img.shields.io/pypi/v/mcpstate.svg)](https://pypi.org/project/mcpstate/)
 ![Tests](https://img.shields.io/badge/tests-97%20passing-brightgreen.svg)
 ![Typed](https://img.shields.io/badge/typed-mypy%20clean-brightgreen.svg)
 
