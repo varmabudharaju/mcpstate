@@ -7,6 +7,7 @@ what they point to: durable, user-scoped, versioned, TTL'd.
 from __future__ import annotations
 
 import json
+import random
 import re
 import secrets
 import time
@@ -29,7 +30,7 @@ _KIND_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz234567"
 _CREDENTIALS_RE = re.compile(r"://[^@/]*@")
 _MAX_TTL_DAYS = 36525  # ~100 years; keeps expires_at well inside the datetime range
-_PATCH_MAX_ATTEMPTS = 100  # with backoff, spurious failure is negligible even under load
+_PATCH_MAX_ATTEMPTS = 200  # with jittered backoff, spurious failure is negligible under load
 
 
 def _redact(url: str) -> str:
@@ -323,8 +324,11 @@ class HandleStore:
             )
             if self._backend.cas_put(user, handle, current.version, new):
                 return _snapshot(handle, new)
-            # Lost the race: back off briefly (bounded, attempt-scaled) and retry.
-            time.sleep(min(0.05, 0.0005 * (attempt + 1)))
+            # Lost the race. A patch is always semantically retryable, so back off
+            # with exponential growth + full jitter to decorrelate competing
+            # writers, then retry.
+            ceiling = min(0.1, 0.0005 * (2 ** min(attempt, 8)))
+            time.sleep(random.uniform(0, ceiling))
         raise BackendError(
             f"Patch on '{handle}' failed after {_PATCH_MAX_ATTEMPTS} attempts under "
             "sustained write contention.",
