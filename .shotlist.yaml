@@ -1,0 +1,31 @@
+# Visual test evidence for mcpstate. Regenerate any time with:  shotlist run
+output:
+  dir: docs/screenshots
+
+shots:
+  - name: cli-help
+    kind: cli
+    command: "~/Library/Python/3.11/bin/mcpstate --help"
+    style: rendered
+    cols: 90
+    rows: 14
+    alt: "mcpstate --help showing the serve subcommand"
+
+  - name: test-suite
+    kind: cli
+    command: "python3 -m pytest -q"
+    style: rendered
+    cols: 90
+    rows: 8
+    alt: "full pytest suite green"
+
+  - name: hand-off-demo
+    kind: session
+    clear_between: true
+    steps:
+      - name: session-one-mints
+        command: "python3 -c \"from mcpstate import HandleStore; s = HandleStore.from_url('sqlite:///demo-state.db'); h = s.mint('research', {'sources': ['arxiv/2401.00001'], 'notes': 'phase 1 done'}, user='varma'); open('demo-handle.txt', 'w').write(h); print('session 1 minted:', h)\""
+        alt: "Session 1 mints a research handle and saves state"
+      - name: session-two-resumes
+        command: "python3 -c \"from mcpstate import HandleStore; h = open('demo-handle.txt').read(); s = HandleStore.from_url('sqlite:///demo-state.db'); print('session 2 sees handles:', [i.handle for i in s.list('varma')]); print('session 2 resumed state:', s.get(h, user='varma').state)\""
+        alt: "A separate process lists and resumes the same state - the hand-off"

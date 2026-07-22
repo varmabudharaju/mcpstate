@@ -1,0 +1,48 @@
+{
+  "schema_version": "1",
+  "generated_at": "2026-07-22T22:20:24Z",
+  "config": ".shotlist.yaml",
+  "shot_count": 4,
+  "shots": [
+    {
+      "index": 1,
+      "name": "cli-help",
+      "kind": "cli",
+      "alt": "mcpstate --help showing the serve subcommand",
+      "file": "01-cli-help.png",
+      "bytes": 28336,
+      "sha256": "7341acfc08faa6ff82187f4df887461a5ee68f807070b8d4ceeeb49ab31e49ea",
+      "deterministic": true
+    },
+    {
+      "index": 2,
+      "name": "test-suite",
+      "kind": "cli",
+      "alt": "full pytest suite green",
+      "file": "02-test-suite.png",
+      "bytes": 7036,
+      "sha256": "94dbc818adeadf6f130ac4210051a9b416e458a333081bed0bfba7d137dd78b2",
+      "deterministic": true
+    },
+    {
+      "index": 3,
+      "name": "session-one-mints",
+      "kind": "session",
+      "alt": "Session 1 mints a research handle and saves state",
+      "file": "03-session-one-mints.png",
+      "bytes": 168551,
+      "sha256": "ea348fa3e505517ef79277f1d39c10006a44be14ba3a6cf78f5b808a018d2613",
+      "deterministic": false
+    },
+    {
+      "index": 4,
+      "name": "session-two-resumes",
+      "kind": "session",
+      "alt": "A separate process lists and resumes the same state - the hand-off",
+      "file": "04-session-two-resumes.png",
+      "bytes": 177764,
+      "sha256": "af54756273f749eff7e5ca4120440b812fd81b3a5a1d36fc123fa237b71a3c31",
+      "deterministic": false
+    }
+  ]
+}
