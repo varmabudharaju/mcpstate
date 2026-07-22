@@ -83,3 +83,24 @@ async def test_state_load_selective_path():
     assert partial["path"] == "sources"
     bad = await call("state_load", handle=minted["handle"], path="nope.deep")
     assert bad["ok"] is False and bad["error"]["code"] == "patch_error"
+
+
+async def test_state_list_sweeps_expired_records(tmp_path):
+    from mcpstate import HandleStore
+    from mcpstate.backends.sqlite import SQLiteBackend
+
+    class Box:
+        now = 1_000_000.0
+
+        def __call__(self):
+            return self.now
+
+    clock = Box()
+    backend = SQLiteBackend(str(tmp_path / "sweep.db"))
+    server._store = HandleStore(backend, clock=clock)
+    server._store.mint("note", {}, user="tester", ttl_days=1)
+    keep = server._store.mint("note", {}, user="tester")
+    clock.now += 2 * 86400
+    listing = await call("state_list")
+    assert [h["handle"] for h in listing["handles"]] == [keep]
+    assert [h for h, _ in backend.list("tester")] == [keep]  # physically swept

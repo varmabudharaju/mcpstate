@@ -89,7 +89,10 @@ def state_list(kind: str | None = None) -> dict:
     metadata but not full state. Use at the start of a session to offer resuming
     earlier work, e.g. 'there is a research session from yesterday'."""
     try:
-        infos = _get_store().list(current_user(), kind=kind)
+        store = _get_store()
+        user = current_user()
+        store.sweep(user)  # opportunistic cleanup so expired records never accumulate
+        infos = store.list(user, kind=kind)
         return {"ok": True, "handles": [i.to_dict() for i in infos]}
     except McpStateError as err:
         return _fail(err)
