@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from fastmcp import FastMCP
 
-from .errors import McpStateError
+from .errors import InternalError, McpStateError
 from .fastmcp import current_user, current_writer, store_from_env
 from .ops import get_path, op_from_dict
 from .store import HandleStore
@@ -17,6 +17,7 @@ from .store import HandleStore
 mcp = FastMCP("mcpstate")
 
 _store: HandleStore | None = None
+_require_auth: bool = False
 
 
 def _get_store() -> HandleStore:
@@ -26,8 +27,19 @@ def _get_store() -> HandleStore:
     return _store
 
 
+def _whoami() -> str:
+    return current_user(require_auth=_require_auth)
+
+
 def _fail(err: McpStateError) -> dict:
     return {"ok": False, "error": err.to_payload()}
+
+
+def _internal(exc: Exception) -> dict:
+    # Last-resort safety net: never leak raw exception text (it may carry
+    # credentials or paths); return only the failure class name.
+    return _fail(InternalError(
+        f"An unexpected {type(exc).__name__} occurred in the state backend."))
 
 
 @mcp.tool
@@ -44,7 +56,7 @@ def state_save(
     `stale_write` error, another session changed the state: read `error.current.state`,
     re-apply your change on top of it, and save again with the new version."""
     store = _get_store()
-    user = current_user()
+    user = _whoami()
     try:
         if handle is None:
             new_handle = store.mint(kind, state, user=user, ttl_days=ttl_days,
@@ -64,6 +76,8 @@ def state_save(
         return {"ok": True, "handle": handle, "version": snap.version}
     except McpStateError as err:
         return _fail(err)
+    except Exception as exc:  # safety net: keep the agent-legible contract
+        return _internal(exc)
 
 
 @mcp.tool
@@ -73,7 +87,7 @@ def state_load(handle: str, path: str | None = None) -> dict:
     For large states, pass `path` (dotted, e.g. "sources" or "profile.tags") to
     load just that subtree instead of the whole state."""
     try:
-        snap = _get_store().get(handle, user=current_user())
+        snap = _get_store().get(handle, user=_whoami())
         payload = {"ok": True, **snap.to_dict()}
         if path:
             payload["state"] = get_path(snap.state, path)
@@ -81,6 +95,8 @@ def state_load(handle: str, path: str | None = None) -> dict:
         return payload
     except McpStateError as err:
         return _fail(err)
+    except Exception as exc:  # safety net: keep the agent-legible contract
+        return _internal(exc)
 
 
 @mcp.tool
@@ -90,12 +106,14 @@ def state_list(kind: str | None = None) -> dict:
     earlier work, e.g. 'there is a research session from yesterday'."""
     try:
         store = _get_store()
-        user = current_user()
+        user = _whoami()
         store.sweep(user)  # opportunistic cleanup so expired records never accumulate
         infos = store.list(user, kind=kind)
         return {"ok": True, "handles": [i.to_dict() for i in infos]}
     except McpStateError as err:
         return _fail(err)
+    except Exception as exc:  # safety net: keep the agent-legible contract
+        return _internal(exc)
 
 
 @mcp.tool
@@ -110,10 +128,12 @@ def state_patch(handle: str, ops: list[dict]) -> dict:
     Prefer patch over save for adding items — it never gets a stale_write."""
     try:
         parsed = [op_from_dict(o) for o in ops]
-        snap = _get_store().patch(handle, parsed, user=current_user(), writer=current_writer())
+        snap = _get_store().patch(handle, parsed, user=_whoami(), writer=current_writer())
         return {"ok": True, **snap.to_dict()}
     except McpStateError as err:
         return _fail(err)
+    except Exception as exc:  # safety net: keep the agent-legible contract
+        return _internal(exc)
 
 
 @mcp.tool
@@ -121,15 +141,18 @@ def state_delete(handle: str) -> dict:
     """Permanently delete durable state. Only do this when the user asks or the
     work it tracks is truly finished."""
     try:
-        _get_store().revoke(handle, user=current_user())
+        _get_store().revoke(handle, user=_whoami())
         return {"ok": True, "handle": handle, "deleted": True}
     except McpStateError as err:
         return _fail(err)
+    except Exception as exc:  # safety net: keep the agent-legible contract
+        return _internal(exc)
 
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
     import os
+    import sys
 
     from . import __version__
 
@@ -143,6 +166,12 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--backend", help="backend URL (sqlite:///path or redis://...)")
     serve.add_argument("--transport", choices=["stdio", "http"], default="stdio")
     serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument(
+        "--allow-anonymous",
+        action="store_true",
+        help="HTTP only: permit unauthenticated callers to SHARE one state bucket "
+        "(MCPSTATE_USER or 'local'). Unsafe for multi-user servers.",
+    )
 
     args = parser.parse_args(argv)
     if args.version:
@@ -151,9 +180,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "serve":
         if args.backend:
             os.environ["MCPSTATE_BACKEND"] = args.backend
-        global _store
+        global _store, _require_auth
         _store = None
+        # On HTTP, fail closed unless the operator explicitly opts into a shared
+        # anonymous bucket: an unauthenticated multi-user server must never
+        # silently merge everyone's state.
+        _require_auth = args.transport == "http" and not args.allow_anonymous
         if args.transport == "http":
+            if args.allow_anonymous:
+                sys.stderr.write(
+                    "mcpstate: WARNING serving HTTP with --allow-anonymous; all "
+                    "unauthenticated callers share one state bucket.\n"
+                )
             mcp.run(transport="http", port=args.port)
         else:
             mcp.run()

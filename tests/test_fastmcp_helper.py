@@ -33,3 +33,14 @@ def test_current_writer_defaults_to_hostname(monkeypatch):
 
     monkeypatch.delenv("MCPSTATE_WRITER", raising=False)
     assert current_writer() == socket.gethostname()
+
+
+def test_current_user_require_auth_raises_when_unresolved(monkeypatch):
+    from mcpstate.errors import Unauthenticated
+
+    monkeypatch.delenv("MCPSTATE_USER", raising=False)
+    with pytest.raises(Unauthenticated):
+        current_user(require_auth=True)
+
+
+import pytest  # noqa: E402

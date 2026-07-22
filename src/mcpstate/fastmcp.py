@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 
+from .errors import Unauthenticated
 from .store import HandleStore
 
 
@@ -25,21 +26,45 @@ def current_writer() -> str:
     return socket.gethostname()
 
 
-def current_user() -> str:
-    """Resolve the state-scoping user for the current request.
-
-    Order: OAuth subject (when the server runs with FastMCP auth) ->
-    MCPSTATE_USER env -> "local" (single-user stdio servers). Never raises.
-    """
+def _oauth_subject() -> str | None:
+    """The authenticated caller's identity, issuer-scoped, or None."""
     try:
         from fastmcp.server.dependencies import get_access_token
 
         token = get_access_token()
-        if token is not None:
-            claims = getattr(token, "claims", None) or {}
-            subject = claims.get("sub") or getattr(token, "client_id", None)
-            if subject:
-                return str(subject)
+        if token is None:
+            return None
+        claims = getattr(token, "claims", None) or {}
+        sub = claims.get("sub")
+        if sub:
+            issuer = claims.get("iss")
+            # Scope by issuer: an OAuth `sub` is only unique within its issuer,
+            # so two IdPs can mint the same sub for different humans.
+            return f"{issuer}#{sub}" if issuer else str(sub)
+        client_id = getattr(token, "client_id", None)
+        if client_id:
+            return f"client:{client_id}"
     except Exception:
-        pass
+        return None
+    return None
+
+
+def current_user(require_auth: bool = False) -> str:
+    """Resolve the state-scoping user for the current request.
+
+    Order: OAuth subject (issuer-scoped, when the server runs with FastMCP
+    auth) -> MCPSTATE_USER env -> "local" (single-user stdio servers).
+
+    When ``require_auth`` is set (the server does this on the HTTP transport),
+    an unresolvable identity raises :class:`Unauthenticated` instead of falling
+    back to the shared "local" bucket — a security boundary must fail closed.
+    """
+    subject = _oauth_subject()
+    if subject:
+        return subject
+    if require_auth:
+        raise Unauthenticated(
+            "No authenticated caller could be resolved. This server requires auth "
+            "on the HTTP transport so that state stays isolated per user."
+        )
     return os.environ.get("MCPSTATE_USER", "local")

@@ -104,3 +104,24 @@ async def test_state_list_sweeps_expired_records(tmp_path):
     listing = await call("state_list")
     assert [h["handle"] for h in listing["handles"]] == [keep]
     assert [h for h, _ in backend.list("tester")] == [keep]  # physically swept
+
+
+async def test_malformed_ops_return_structured_error_not_crash(monkeypatch, tmp_path):
+    monkeypatch.setenv("MCPSTATE_BACKEND", f"sqlite:///{tmp_path}/m.db")
+    server._store = None
+    minted = await call("state_save", kind="note", state={})
+    res = await call("state_patch", handle=minted["handle"],
+                     ops=[{"op": "merge", "mapping": "not-a-dict"}])
+    assert res["ok"] is False and res["error"]["code"] == "patch_error"
+
+
+async def test_backend_failure_returns_internal_error_not_crash(monkeypatch):
+    class BoomStore:
+        def get(self, *a, **k):
+            raise RuntimeError("redis exploded with secret://user:pass@host")
+
+    monkeypatch.setattr(server, "_store", None)
+    monkeypatch.setattr(server, "_get_store", lambda: BoomStore())
+    res = await call("state_load", handle="note_x")
+    assert res["ok"] is False and res["error"]["code"] == "internal_error"
+    assert "pass@host" not in res["error"]["message"]  # no detail leak
