@@ -68,14 +68,27 @@ def test_op_from_dict_rejects_malformed_ops():
 
 
 def test_deeply_nested_patch_is_clean_error_not_crash(store):
+    import inspect
+    import sys
+
     h = store.mint("deep", {"a": {}}, user="u")
     ops = []
     path = "a"
-    for _ in range(5000):
+    for _ in range(2000):
         ops.append(SetKey(path, "a", {}))
         path += ".a"
-    with pytest.raises((PatchError, StateTooLarge, ValueError)):
-        store.patch(h, ops, user="u")
+    # Force the recursion path deterministically across platforms (Linux CI has
+    # more stack than macOS): cap the limit just above the current stack depth,
+    # so the 2000-deep deepcopy overflows but pytest's own frames stay safe. The
+    # guarantee is that RecursionError becomes a clean error, never a crash.
+    depth = len(inspect.stack())
+    original = sys.getrecursionlimit()
+    sys.setrecursionlimit(depth + 200)
+    try:
+        with pytest.raises((PatchError, StateTooLarge, ValueError)):
+            store.patch(h, ops, user="u")
+    finally:
+        sys.setrecursionlimit(original)
     assert store.get(h, user="u").state == {"a": {}}  # original intact
 
 
