@@ -9,6 +9,7 @@ from .errors import (
     McpStateError,
     PatchError,
     StaleWrite,
+    StateTooLarge,
 )
 from .ops import Append, DelKey, Merge, PatchOp, SetKey, apply_ops, op_from_dict
 from .store import HandleInfo, HandleStore, Snapshot
@@ -24,6 +25,7 @@ __all__ = [
     "HandleExpired",
     "StaleWrite",
     "PatchError",
+    "StateTooLarge",
     "BackendError",
     "Append",
     "SetKey",

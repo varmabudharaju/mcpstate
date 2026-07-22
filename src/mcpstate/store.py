@@ -6,6 +6,7 @@ what they point to: durable, user-scoped, versioned, TTL'd.
 """
 from __future__ import annotations
 
+import json
 import re
 import secrets
 import time
@@ -14,11 +15,17 @@ from datetime import datetime, timezone
 from typing import Callable, Sequence
 
 from .backends.base import Backend, Record
-from .errors import BackendError, HandleExpired, HandleNotFound, StaleWrite
+from .errors import BackendError, HandleExpired, HandleNotFound, StaleWrite, StateTooLarge
 from .ops import PatchOp, apply_ops
 
 _KIND_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz234567"
+_CREDENTIALS_RE = re.compile(r"://[^@/]*@")
+
+
+def _redact(url: str) -> str:
+    """Strip userinfo (passwords) from a URL before it enters any error message."""
+    return _CREDENTIALS_RE.sub("://***@", url)
 
 
 def _dt(ts: float | None) -> datetime | None:
@@ -78,10 +85,35 @@ def _snapshot(handle: str, rec: Record) -> Snapshot:
 
 class HandleStore:
     DEFAULT_URL = "sqlite:///~/.mcpstate/state.db"
+    DEFAULT_MAX_STATE_BYTES = 1_048_576  # 1 MiB
 
-    def __init__(self, backend: Backend, *, clock: Callable[[], float] = time.time) -> None:
+    def __init__(
+        self,
+        backend: Backend,
+        *,
+        clock: Callable[[], float] = time.time,
+        max_state_bytes: int = DEFAULT_MAX_STATE_BYTES,
+    ) -> None:
         self._backend = backend
         self._clock = clock
+        self._max_state_bytes = max_state_bytes
+
+    def _check_state(self, state: dict) -> None:
+        if not isinstance(state, dict):
+            raise ValueError(
+                f"State root must be a JSON object (dict), got {type(state).__name__}"
+            )
+        try:
+            size = len(json.dumps(state).encode())
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"State contains values that are not JSON-serializable: {exc}") from None
+        if size > self._max_state_bytes:
+            raise StateTooLarge(
+                f"State is {size} bytes; the limit is {self._max_state_bytes}. "
+                "Store a summary or split the work across smaller handles.",
+                size_bytes=size,
+                limit_bytes=self._max_state_bytes,
+            )
 
     @classmethod
     def from_url(cls, url: str | None = None) -> "HandleStore":
@@ -97,13 +129,14 @@ class HandleStore:
             except ImportError:
                 raise BackendError(
                     'Redis backend requires the redis package: pip install "mcpstate[redis]"',
-                    url=url,
+                    url=_redact(url),
                 ) from None
             from .backends.redis import RedisBackend
 
             return cls(RedisBackend(redis.Redis.from_url(url)))
         raise ValueError(
-            f"Unsupported backend URL {url!r}. Supported: sqlite:///path, redis://host[:port]/db"
+            f"Unsupported backend URL {_redact(url)!r}. "
+            "Supported: sqlite:///path, redis://host[:port]/db"
         )
 
     def _load_live(self, user: str, handle: str) -> Record:
@@ -137,10 +170,7 @@ class HandleStore:
         """Create durable state and return its opaque handle."""
         if not _KIND_RE.match(kind):
             raise ValueError(f"Invalid kind {kind!r}: must match ^[a-z][a-z0-9-]{{0,31}}$")
-        if not isinstance(state, dict):
-            raise ValueError(
-                f"State root must be a JSON object (dict), got {type(state).__name__}"
-            )
+        self._check_state(state)
         now = self._clock()
         expires_at = None if ttl_days is None else now + ttl_days * 86400
         record = Record(
@@ -177,10 +207,7 @@ class HandleStore:
         carries the full current snapshot — hand it to the model to merge and
         retry.
         """
-        if not isinstance(state, dict):
-            raise ValueError(
-                f"State root must be a JSON object (dict), got {type(state).__name__}"
-            )
+        self._check_state(state)
         current = self._load_live(user, handle)
         new = Record(
             kind=current.kind,
@@ -221,6 +248,7 @@ class HandleStore:
         for _ in range(20):
             current = self._load_live(user, handle)
             new_state = apply_ops(current.state, ops)
+            self._check_state(new_state)
             new = Record(
                 kind=current.kind,
                 state=new_state,

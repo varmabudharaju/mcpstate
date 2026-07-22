@@ -154,3 +154,41 @@ def test_sweep_removes_only_expired(store, clockbox):
     clockbox.now += 2 * 86400
     assert store.sweep("u") == 1
     assert [i.handle for i in store.list("u", include_expired=True)] == [keep]
+
+
+# --- input hardening ----------------------------------------------------------
+import datetime as _dt_mod  # noqa: E402
+
+from mcpstate.backends.sqlite import SQLiteBackend as _SQLite  # noqa: E402
+from mcpstate.errors import StateTooLarge  # noqa: E402
+
+
+def test_from_url_errors_never_leak_credentials():
+    with pytest.raises(ValueError) as exc:
+        HandleStore.from_url("bogus://admin:supersecret@host/0")
+    assert "supersecret" not in str(exc.value)
+    assert "bogus" in str(exc.value)
+
+
+def test_non_serializable_state_rejected_early(store):
+    with pytest.raises(ValueError, match="JSON"):
+        store.mint("note", {"when": _dt_mod.datetime.now()}, user="u")
+    h = store.mint("note", {}, user="u")
+    with pytest.raises(ValueError, match="JSON"):
+        store.save(h, {"when": _dt_mod.datetime.now()}, user="u", expect_version=1)
+
+
+def test_state_size_guard_on_mint_save_and_patch(tmp_path, clockbox):
+    s = HandleStore(_SQLite(str(tmp_path / "z.db")), clock=clockbox, max_state_bytes=100)
+    with pytest.raises(StateTooLarge) as exc:
+        s.mint("note", {"blob": "x" * 200}, user="u")
+    assert exc.value.to_payload()["code"] == "state_too_large"
+    assert exc.value.details["limit_bytes"] == 100
+    h = s.mint("note", {"blob": "ok"}, user="u")
+    with pytest.raises(StateTooLarge):
+        s.save(h, {"blob": "y" * 200}, user="u", expect_version=1)
+    h2 = s.mint("items", {"items": []}, user="u")
+    with pytest.raises(StateTooLarge):
+        s.patch(h2, [Append("items", "z" * 200)], user="u")
+    assert s.get(h2, user="u").state == {"items": []}  # failed patch left state intact
+    s.close()

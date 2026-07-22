@@ -47,6 +47,12 @@ class PatchError(McpStateError):
     code = "patch_error"
 
 
+class StateTooLarge(McpStateError):
+    """The state exceeds the store's configured size limit."""
+
+    code = "state_too_large"
+
+
 class BackendError(McpStateError):
     """The storage backend failed or is misconfigured."""
 
