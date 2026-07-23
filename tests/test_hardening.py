@@ -158,8 +158,8 @@ def test_from_url_memory_still_works():
 def test_redis_user_named_index_is_isolated():
     import fakeredis
 
-    from mcpstate.backends.redis import RedisBackend
     from mcpstate.backends.base import Record
+    from mcpstate.backends.redis import RedisBackend
 
     b = RedisBackend(fakeredis.FakeRedis())
 
