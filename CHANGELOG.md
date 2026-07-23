@@ -3,6 +3,39 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.2.0 - Unreleased
+
+### Added
+
+- TTL renewal: `HandleStore.touch()` resets a handle's expiry from now (or
+  clears it with `ttl_days=None`); `save()` accepts `ttl_days` (default
+  `KEEP_TTL` leaves expiry unchanged); new flagship tool `state_touch`, and
+  `state_save` renews expiry on update when `ttl_days` is passed. Previously
+  a TTL was fixed at mint forever.
+- `AsyncHandleStore`: async facade with identical semantics — every call runs
+  via `asyncio.to_thread`, so async MCP servers never block the event loop.
+- The `merge` patch op accepts an optional dotted `path` (default `""` = state
+  root), matching the other ops.
+- The 1 MiB state cap is now truly configurable for the flagship server:
+  `MCPSTATE_MAX_STATE_BYTES` env var, plus `from_url(..., max_state_bytes=)`.
+
+### Changed
+
+- SQLite backend: one WAL connection per thread instead of a single
+  lock-serialized connection — concurrent readers no longer queue behind every
+  other operation. `sqlite:///:memory:` now uses a per-instance shared-cache
+  database so all threads see the same state.
+- Redis backend: `list()` fetches all records with one `MGET` instead of N
+  `GET`s and prunes dangling index members; `WatchError` subclasses are
+  correctly treated as lost CAS races.
+- mypy runs in `--strict` mode; CI matrix extended to Python 3.13 and 3.14.
+
+### Fixed
+
+- Docs now state patch-op semantics precisely (append is conflict-free;
+  same-key `set_key`/`merge` resolve last-write-wins), document Redis
+  durability caveats, and note that `kind` is ignored on `state_save` updates.
+
 ## 0.1.0 - 2026-07-22
 
 ### Added

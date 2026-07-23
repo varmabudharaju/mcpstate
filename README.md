@@ -8,8 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)
 [![PyPI](https://img.shields.io/pypi/v/mcpstate.svg)](https://pypi.org/project/mcpstate/)
-![Tests](https://img.shields.io/badge/tests-97%20passing-brightgreen.svg)
-![Typed](https://img.shields.io/badge/typed-mypy%20clean-brightgreen.svg)
+![Typed](https://img.shields.io/badge/typed-mypy%20strict-brightgreen.svg)
 
 `mcpstate` gives MCP agents state that **survives the end of a conversation** —
 and a switch to a different client, or a move to a different device. It ships as
@@ -107,14 +106,15 @@ pip install "mcpstate[fastmcp]"
 }
 ```
 
-The server exposes five tools, written to be driven by a model:
+The server exposes six tools, written to be driven by a model:
 
 | Tool | What the agent uses it for |
 |---|---|
 | `state_save` | Create durable state (mints a handle) or update it (versioned) |
 | `state_load` | Load state by handle (optionally just a subtree via `path`) |
 | `state_list` | "What was I working on?" — list this user's handles |
-| `state_patch` | Additive edits that can't conflict (append, set key, merge) |
+| `state_patch` | Additive edits where every writer lands (append, set key, merge) |
+| `state_touch` | Renew a TTL before it expires, or make state persistent |
 | `state_delete` | Permanently remove state |
 
 For cross-device reach, point every device at a shared Redis:
@@ -154,10 +154,17 @@ except StaleWrite as conflict:
 store.patch(handle, [Append("sources", "https://arxiv.org/abs/...")],
             user="alice", writer="phone/claude")
 
+# Renew the TTL from now — do this before it elapses; expired state is gone.
+store.touch(handle, user="alice", ttl_days=7)
+
 # Resume, any session later: what was this user working on?
 for info in store.list("alice", kind="research"):
     print(info.handle, info.updated_at, info.last_writer)
 ```
+
+Async server? `AsyncHandleStore` mirrors every method with the same semantics,
+running each call in a worker thread so backend I/O never blocks your event
+loop: `store = AsyncHandleStore.from_url(); await store.get(handle, user=...)`.
 
 ## The conflict model
 
@@ -190,9 +197,12 @@ Three mechanisms, cheapest first:
 
 1. **Versioned saves** — every snapshot carries a version; `save` declares the
    version it read; a mismatch raises `StaleWrite` with the current snapshot.
-2. **Commutative patches** — `Append` / `SetKey` / `DelKey` / `Merge` commute,
-   so they apply without version checks and cannot conflict. Most agent-state
-   mutations are additive, so most writes never see a conflict at all.
+2. **Commutative patches** — `Append` / `SetKey` / `DelKey` / `Merge` apply
+   without version checks, so every writer's patch lands and a patch never
+   sees a `StaleWrite`. Most agent-state mutations are additive, so most
+   writes never see a conflict at all. (Precisely: `Append` is fully
+   conflict-free; two sessions `SetKey`/`Merge`-ing the *same* key resolve
+   last-write-wins for that key — the freshness metadata shows who won.)
 3. **Freshness metadata** — every read returns version, `updated_at`, and
    `last_writer`, so a resuming session knows what changed while it was away.
 
@@ -215,19 +225,25 @@ flowchart TD
 | URL | `sqlite:///~/.mcpstate/state.db` | `redis://host:6379/0` |
 | Reach | one machine: conversations + clients | anywhere the Redis is reachable |
 | Setup | none | `pip install "mcpstate[redis]"` + a Redis |
-| Concurrency | atomic compare-and-swap via SQL | optimistic WATCH/MULTI transactions |
+| Concurrency | atomic compare-and-swap via SQL, one WAL connection per thread | optimistic WATCH/MULTI transactions |
 
-Three environment variables configure it: `MCPSTATE_BACKEND` (backend URL, or
+One durability note: Redis persistence is what *your Redis* is configured for —
+with default snapshotting, a crash can lose the last seconds of writes. For
+state you cannot afford to replay, enable AOF (`appendfsync everysec` or
+stricter) on the Redis you point at.
+
+Four environment variables configure it: `MCPSTATE_BACKEND` (backend URL, or
 `--backend`), `MCPSTATE_USER` (identity for local/stdio; remote servers resolve
-the OAuth subject instead), and `MCPSTATE_WRITER` (the `last_writer` label;
-defaults to hostname).
+the OAuth subject instead), `MCPSTATE_WRITER` (the `last_writer` label;
+defaults to hostname), and `MCPSTATE_MAX_STATE_BYTES` (per-handle state cap;
+default 1 MiB).
 
 ## Results & credibility
 
 Everything below is reproducible from a clean checkout with `python3 -m pytest`.
 
-- **97 tests, green on Python 3.11 and 3.12** in CI — with `ruff` and a clean
-  `mypy` pass on every push.
+- **117 tests, green on Python 3.11 through 3.14** in CI — with `ruff` and a
+  clean `mypy --strict` pass on every push.
 - **One backend contract suite runs against both SQLite and Redis**, so the two
   backends are held to identical semantics — not tested separately and hoped to
   match.
@@ -245,8 +261,9 @@ Everything below is reproducible from a clean checkout with `python3 -m pytest`.
 - **Zero required dependencies** in the core library (`redis` and `fastmcp` are
   optional extras); ships `py.typed`.
 
-Security defaults worth knowing: state is capped at 1 MiB (configurable;
-oversized saves return a structured `state_too_large`), credentials never appear
+Security defaults worth knowing: state is capped at 1 MiB (configurable via
+`MCPSTATE_MAX_STATE_BYTES` or `from_url(..., max_state_bytes=...)`; oversized
+saves return a structured `state_too_large`), credentials never appear
 in error messages, and `mcpstate serve --transport http` **fails closed** — it
 refuses unauthenticated callers unless you pass `--allow-anonymous`, so a
 misconfigured server can't silently merge every user's state. Multi-user
@@ -258,14 +275,19 @@ identity comes from FastMCP OAuth (issuer-scoped).
 
 | Method | Behavior | Raises |
 |---|---|---|
-| `from_url(url=None)` | Construct from a backend URL; `None` uses the SQLite default | `ValueError`, `BackendError` |
+| `from_url(url=None, *, max_state_bytes=1 MiB)` | Construct from a backend URL; `None` uses the SQLite default | `ValueError`, `BackendError` |
 | `mint(kind, state, *, user, ttl_days=None, writer=None) -> str` | Create state, return opaque handle `{kind}_{8 chars}` | `ValueError`, `StateTooLarge` |
 | `get(handle, *, user) -> Snapshot` | State + version + timestamps + last writer | `HandleNotFound`, `HandleExpired` |
-| `save(handle, state, *, user, expect_version, writer=None) -> Snapshot` | Versioned full replace | `StaleWrite`, `HandleNotFound`, `HandleExpired`, `StateTooLarge` |
+| `save(handle, state, *, user, expect_version, writer=None, ttl_days=KEEP_TTL) -> Snapshot` | Versioned full replace; `ttl_days` renews expiry from now (`None` clears it) | `StaleWrite`, `HandleNotFound`, `HandleExpired`, `StateTooLarge` |
 | `patch(handle, ops, *, user, writer=None) -> Snapshot` | Apply commutative ops; no version needed | `PatchError`, `HandleNotFound`, `HandleExpired` |
+| `touch(handle, *, user, ttl_days, writer=None) -> Snapshot` | Reset expiry from now (`None` = persistent) without changing state | `HandleNotFound`, `HandleExpired` |
 | `list(user, *, kind=None, include_expired=False) -> list[HandleInfo]` | Metadata only, most recently updated first | — |
 | `revoke(handle, *, user)` | Delete | `HandleNotFound` |
 | `sweep(user) -> int` | Physically remove expired records | — |
+
+`AsyncHandleStore` exposes the same methods as coroutines (each call runs via
+`asyncio.to_thread`); construct it with `AsyncHandleStore.from_url(...)` or by
+wrapping an existing `HandleStore`.
 
 ### Patch ops
 
@@ -274,7 +296,7 @@ identity comes from FastMCP OAuth (issuer-scoped).
 | `Append(path, value)` | `{"op": "append", "path": "sources", "value": ...}` |
 | `SetKey(path, key, value)` | `{"op": "set_key", "path": "profile", "key": "name", "value": ...}` |
 | `DelKey(path, key)` | `{"op": "del_key", "path": "", "key": "draft"}` |
-| `Merge(mapping)` | `{"op": "merge", "mapping": {...}}` |
+| `Merge(mapping, path="")` | `{"op": "merge", "mapping": {...}, "path": ""}` |
 
 `path` is a dotted path into the state (`"profile.tags"`); `""` is the root.
 
@@ -293,7 +315,7 @@ backend and a non-Python sidecar.
 
 ```bash
 python3 -m pip install -e ".[dev]"
-python3 -m pytest        # 97 tests
+python3 -m pytest
 python3 -m ruff check src tests
 python3 -m mypy src/mcpstate
 ```

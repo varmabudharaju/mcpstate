@@ -104,6 +104,12 @@ the same moment both land, no conflict possible. In practice this makes
 genuine `StaleWrite` rejections rare: they only occur on true same-field
 contention via full saves.
 
+One precision worth stating: *append* is conflict-free in the strong sense —
+both values end up in the list. *set_key* and *merge* are conflict-free only
+mechanically: both writes land, but if two sessions target the **same key**,
+the later one wins that key. The freshness metadata (`version`,
+`last_writer`) makes the winner visible rather than silent.
+
 ### Rung 3: freshness on every read
 
 Every `get` returns version, `updated_at`, and `last_writer`. A session that
@@ -137,6 +143,9 @@ wrote against.
 - Two simultaneously-active writers do not get automatic merging: the later
   full save is rejected and must re-apply (agent-mediated), and only patch
   ops land unconditionally.
+- Patch ops are mechanically conflict-free, not always semantically: two
+  sessions `set_key`/`merge`-ing the same key resolve last-write-wins for
+  that key (append never loses data).
 - No live push: an idle session learns about changes at its next read.
 - Cross-device reach requires a network-reachable backend (Redis). A local
   SQLite file cannot sync machines by itself.

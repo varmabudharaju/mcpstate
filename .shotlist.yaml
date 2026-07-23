@@ -39,3 +39,6 @@ shots:
       - name: 4-conflict
         command: "python3 examples/research_assistant.py conflict"
         alt: "Two devices editing at once: the conflict becomes an agent-mergeable state, no write lost"
+      - name: 5-renew
+        command: "python3 examples/research_assistant.py renew"
+        alt: "TTL renewal: state_touch extends the research's life, then makes it persistent"

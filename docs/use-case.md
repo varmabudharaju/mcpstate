@@ -20,6 +20,7 @@ python3 examples/research_assistant.py source "https://developer.arm.com/documen
 python3 examples/research_assistant.py source "https://aws.amazon.com/ec2/graviton/"
 python3 examples/research_assistant.py resume     # a brand-new conversation
 python3 examples/research_assistant.py conflict   # two devices at once
+python3 examples/research_assistant.py renew      # keep it alive longer
 ```
 
 ## 1. Conversation 1 — start the research
@@ -53,6 +54,14 @@ reason about.**
 
 ![Two devices editing at once; the conflict becomes an agent-mergeable state](screenshots/06-4-conflict.png)
 
+## 5. Days later — the TTL is renewed, not mourned
+
+State minted with a TTL no longer dies on a fixed schedule: `state_touch`
+renews the expiry from now, or clears it entirely for long-term projects.
+Renew before expiry — expired state cannot be revived.
+
+![TTL renewal: state_touch extends the research's life, then makes it persistent](screenshots/07-5-renew.png)
+
 ## What this proves
 
 - State is **durable** — it survives across independent processes/conversations.
@@ -60,6 +69,8 @@ reason about.**
   the user, not a dead session.
 - Concurrent edits are **safe and legible** — hand-off sync turns a race into a
   merge the agent performs, rather than losing data or requiring CRDTs.
+- Lifetime is **under the user's control** — TTLs bound forgotten state, and
+  renewal keeps active work alive indefinitely.
 
 Point the same flagship server at a shared Redis backend
 (`--backend redis://…`) and the exact same flow spans physical devices.

@@ -1,8 +1,8 @@
 {
   "schema_version": "1",
-  "generated_at": "2026-07-22T23:18:35Z",
+  "generated_at": "2026-07-23T22:59:52Z",
   "config": ".shotlist.yaml",
-  "shot_count": 6,
+  "shot_count": 7,
   "shots": [
     {
       "index": 1,
@@ -20,8 +20,8 @@
       "kind": "cli",
       "alt": "full pytest suite green",
       "file": "02-test-suite.png",
-      "bytes": 8032,
-      "sha256": "81a400e59735ba10ff81285d3b31296564ab0314d65c7f452f470815fb5c8123",
+      "bytes": 7826,
+      "sha256": "a67812b6ddc21e060c37eda2888fb7e2d4eb657c8dec56ea193a130ba9a76852",
       "deterministic": true
     },
     {
@@ -30,8 +30,8 @@
       "kind": "session",
       "alt": "Conversation 1: the assistant starts durable research and mints a handle",
       "file": "03-1-start.png",
-      "bytes": 191290,
-      "sha256": "76616269e2b8d92a2bd405b96891d7448c55e37f2bfe46238fadf5a727183efc",
+      "bytes": 192970,
+      "sha256": "59f4902438dc60a55e443230e4809180fa02a40ff0957d5ce58642ed8cd73d17",
       "deterministic": false
     },
     {
@@ -40,8 +40,8 @@
       "kind": "session",
       "alt": "Still conversation 1: two sources appended via commutative patches",
       "file": "04-2-collect.png",
-      "bytes": 222628,
-      "sha256": "b00e3affe772d26216da393333c69b75b6cab628adccb17bd47056604c54b0fb",
+      "bytes": 225842,
+      "sha256": "31fd66f8527670c57265a222fdd8dc25569ff568984e8e95cdc6f7a609f32773",
       "deterministic": false
     },
     {
@@ -50,8 +50,8 @@
       "kind": "session",
       "alt": "Conversation 2, a brand-new chat: the assistant recovers the full research state",
       "file": "05-3-resume.png",
-      "bytes": 234739,
-      "sha256": "0f6122c04006a483db6927ae5d756d8668b015ed744b5a168574768757c97cb5",
+      "bytes": 238424,
+      "sha256": "18ac4ff784caa5a8cdd23dcfcfe2f362db8a1d6cf5c09b1e91a339dcbd67f9e4",
       "deterministic": false
     },
     {
@@ -60,8 +60,18 @@
       "kind": "session",
       "alt": "Two devices editing at once: the conflict becomes an agent-mergeable state, no write lost",
       "file": "06-4-conflict.png",
-      "bytes": 241085,
-      "sha256": "911762014410dc54e1b890dbbc5f171851fe04e94a295976e35d31ac17679153",
+      "bytes": 244513,
+      "sha256": "d9a0a0585013320613cad06f8c990e001dcedcba1263863c2af6c4c0655ef466",
+      "deterministic": false
+    },
+    {
+      "index": 7,
+      "name": "5-renew",
+      "kind": "session",
+      "alt": "TTL renewal: state_touch extends the research's life, then makes it persistent",
+      "file": "07-5-renew.png",
+      "bytes": 222072,
+      "sha256": "b650791b6d1aebeb8169edd241968b478bf3d74d19907b55e1852fff81a02ca2",
       "deterministic": false
     }
   ]

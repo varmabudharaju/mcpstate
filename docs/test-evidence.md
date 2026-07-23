@@ -2,8 +2,9 @@
 
 Real screenshots captured with [shotlist](https://pypi.org/project/shotlist/)
 (`shotlist run` regenerates them). Assertion-level coverage lives in `tests/`
-(97 tests: backend contract suite on SQLite and Redis, concurrency race
-proofs, input-hardening regressions, FastMCP integration, CLI).
+(117 tests: backend contract suite on SQLite and Redis, concurrency race
+proofs, input-hardening regressions, TTL renewal, the async facade, FastMCP
+integration, CLI).
 
 ## The use case, end to end
 
