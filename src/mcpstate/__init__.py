@@ -13,15 +13,18 @@ from .errors import (
     Unauthenticated,
     InternalError,
 )
+from .aio import AsyncHandleStore
 from .ops import Append, DelKey, Merge, PatchOp, SetKey, apply_ops, op_from_dict
-from .store import HandleInfo, HandleStore, Snapshot
+from .store import KEEP_TTL, HandleInfo, HandleStore, Snapshot
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "HandleStore",
+    "AsyncHandleStore",
     "Snapshot",
     "HandleInfo",
+    "KEEP_TTL",
     "McpStateError",
     "HandleNotFound",
     "HandleExpired",

@@ -9,6 +9,24 @@ def test_store_from_env_uses_env_backend(monkeypatch, tmp_path):
     assert (tmp_path / "env.db").exists()
 
 
+def test_store_from_env_reads_max_state_bytes(monkeypatch, tmp_path):
+    from mcpstate.errors import StateTooLarge
+
+    monkeypatch.setenv("MCPSTATE_BACKEND", f"sqlite:///{tmp_path}/cap.db")
+    monkeypatch.setenv("MCPSTATE_MAX_STATE_BYTES", "100")
+    store = store_from_env()
+    with pytest.raises(StateTooLarge):
+        store.mint("note", {"blob": "x" * 200}, user="u")
+    store.close()
+
+
+def test_store_from_env_rejects_garbage_max_state_bytes(monkeypatch, tmp_path):
+    monkeypatch.setenv("MCPSTATE_BACKEND", f"sqlite:///{tmp_path}/cap.db")
+    monkeypatch.setenv("MCPSTATE_MAX_STATE_BYTES", "a lot")
+    with pytest.raises(ValueError, match="MCPSTATE_MAX_STATE_BYTES"):
+        store_from_env()
+
+
 def test_current_user_prefers_env_override(monkeypatch):
     monkeypatch.setenv("MCPSTATE_USER", "varma")
     assert current_user() == "varma"

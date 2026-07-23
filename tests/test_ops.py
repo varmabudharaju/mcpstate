@@ -22,6 +22,22 @@ def test_merge_shallow_merges_root():
     assert out == {"a": 1, "b": 2, "c": 3}
 
 
+def test_merge_at_nested_path():
+    state = {"profile": {"tags": {"a": 1}, "name": "x"}, "sources": []}
+    out = apply_ops(state, [Merge({"tags": {"b": 2}, "role": "dev"}, path="profile")])
+    assert out["profile"] == {"tags": {"b": 2}, "name": "x", "role": "dev"}
+    assert out["sources"] == []
+    with pytest.raises(PatchError):  # merge target must be an object
+        apply_ops(state, [Merge({"x": 1}, path="sources")])
+
+
+def test_merge_wire_form_accepts_optional_path():
+    assert op_from_dict({"op": "merge", "mapping": {"x": 1}, "path": "profile"}) == Merge(
+        {"x": 1}, "profile"
+    )
+    assert op_from_dict({"op": "merge", "mapping": {"x": 1}}) == Merge({"x": 1})  # root default
+
+
 def test_missing_path_raises_patch_error_with_details():
     with pytest.raises(PatchError) as exc:
         apply_ops({}, [Append("nope", 1)])

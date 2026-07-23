@@ -106,6 +106,31 @@ async def test_state_list_sweeps_expired_records(tmp_path):
     assert [h for h, _ in backend.list("tester")] == [keep]  # physically swept
 
 
+async def test_state_touch_extends_then_clears_expiry():
+    minted = await call("state_save", kind="research", state={}, ttl_days=1)
+    h = minted["handle"]
+    touched = await call("state_touch", handle=h, ttl_days=30)
+    assert touched["ok"] and touched["expires_at"] is not None
+    cleared = await call("state_touch", handle=h)  # omitted ttl -> persistent
+    assert cleared["ok"] and cleared["expires_at"] is None
+    missing = await call("state_touch", handle="research_zzzzzzzz", ttl_days=1)
+    assert missing["ok"] is False and missing["error"]["code"] == "handle_not_found"
+
+
+async def test_state_save_update_renews_ttl_only_when_given():
+    minted = await call("state_save", kind="note", state={"n": 1}, ttl_days=1)
+    h = minted["handle"]
+    kept = await call("state_save", kind="note", state={"n": 2}, handle=h, expect_version=1)
+    loaded = await call("state_load", handle=h)
+    assert kept["ok"] and loaded["expires_at"] is not None  # omitted -> unchanged
+    renewed = await call(
+        "state_save", kind="note", state={"n": 3}, handle=h, expect_version=2, ttl_days=90
+    )
+    assert renewed["ok"]
+    reloaded = await call("state_load", handle=h)
+    assert reloaded["expires_at"] > loaded["expires_at"]
+
+
 async def test_malformed_ops_return_structured_error_not_crash(monkeypatch, tmp_path):
     monkeypatch.setenv("MCPSTATE_BACKEND", f"sqlite:///{tmp_path}/m.db")
     server._store = None

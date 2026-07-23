@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mcpstate"
-version = "0.1.0"
+version = "0.2.0"
 description = "Durable, user-keyed state for stateless MCP servers — handles, hand-off sync, agent-mediated conflict resolution."
 readme = "README.md"
 license = "MIT"
@@ -16,6 +16,8 @@ classifiers = [
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Software Development :: Libraries",
 ]
 dependencies = []
@@ -50,7 +52,5 @@ testpaths = ["tests"]
 line-length = 100
 
 [tool.mypy]
-strict = false
-check_untyped_defs = true
-warn_unused_ignores = true
+strict = true
 files = ["src/mcpstate"]

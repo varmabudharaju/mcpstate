@@ -13,6 +13,7 @@ Run it as a story:
     python3 examples/research_assistant.py source "https://aws.amazon.com/ec2/graviton/"
     python3 examples/research_assistant.py resume     # a NEW conversation
     python3 examples/research_assistant.py conflict    # two devices at once
+    python3 examples/research_assistant.py renew      # keep it alive longer
 """
 from __future__ import annotations
 
@@ -143,7 +144,22 @@ async def conflict() -> None:
     print("\n  \033[32mNo write was lost. The conflict became a merge the agent could reason about.\033[0m")
 
 
-ACTIONS = {"start": start, "resume": resume, "conflict": conflict}
+async def renew() -> None:
+    as_device("phone")
+    h = load_handle()
+    rule("Days later  ·  the research TTL is running out")
+    you('"I\'ll be travelling — keep this research alive for another month."')
+    res = await call("state_touch", handle=h, ttl_days=30)
+    tool(f'state_touch  ->  now expires {res["expires_at"][:10]}  (version {res["version"]})')
+    agent(f"Renewed: this research now lives until {res['expires_at'][:10]}.")
+    you('"Actually, never expire it — it\'s becoming a long-term project."')
+    res = await call("state_touch", handle=h)
+    tool(f'state_touch  ->  expires_at {res["expires_at"]}  (persistent)')
+    agent("Done — it is persistent now and will wait for you indefinitely.")
+    print("\n  \033[32mTTL renewal: durable state stays alive exactly as long as you need it.\033[0m")
+
+
+ACTIONS = {"start": start, "resume": resume, "conflict": conflict, "renew": renew}
 
 
 def main() -> int:
@@ -156,7 +172,7 @@ def main() -> int:
     elif action in ACTIONS:
         asyncio.run(ACTIONS[action]())
     else:
-        print(f"unknown action {action!r}; try: start | source <url> | resume | conflict")
+        print(f"unknown action {action!r}; try: start | source <url> | resume | conflict | renew")
         return 1
     return 0
 

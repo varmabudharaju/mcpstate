@@ -8,13 +8,13 @@ Expiry is not a backend concern; the store applies TTL logic on top.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 
 @dataclass
 class Record:
     kind: str
-    state: dict
+    state: dict[str, Any]
     version: int
     created_at: float
     updated_at: float

@@ -13,7 +13,7 @@ import secrets
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Callable, Sequence
+from typing import Any, Callable, Sequence
 
 from .backends.base import Backend, Record
 from .errors import (
@@ -31,6 +31,16 @@ _ALPHABET = "abcdefghijklmnopqrstuvwxyz234567"
 _CREDENTIALS_RE = re.compile(r"://[^@/]*@")
 _MAX_TTL_DAYS = 36525  # ~100 years; keeps expires_at well inside the datetime range
 _PATCH_MAX_ATTEMPTS = 200  # with jittered backoff, spurious failure is negligible under load
+
+
+class _KeepTtl:
+    """Sentinel type: leave the stored expiry unchanged (distinct from None = clear it)."""
+
+    def __repr__(self) -> str:
+        return "KEEP_TTL"
+
+
+KEEP_TTL = _KeepTtl()
 
 
 def _redact(url: str) -> str:
@@ -78,7 +88,7 @@ class HandleInfo:
     expires_at: datetime | None
     last_writer: str | None
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "handle": self.handle,
             "kind": self.kind,
@@ -94,9 +104,9 @@ class HandleInfo:
 class Snapshot(HandleInfo):
     """A handle's state plus the freshness metadata needed to save it back."""
 
-    state: dict = field(default_factory=dict)
+    state: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {**super().to_dict(), "state": self.state}
 
 
@@ -128,7 +138,7 @@ class HandleStore:
         self._clock = clock
         self._max_state_bytes = max_state_bytes
 
-    def _check_state(self, state: dict) -> None:
+    def _check_state(self, state: dict[str, Any]) -> None:
         if not isinstance(state, dict):
             raise ValueError(
                 f"State root must be a JSON object (dict), got {type(state).__name__}"
@@ -152,7 +162,12 @@ class HandleStore:
             )
 
     @classmethod
-    def from_url(cls, url: str | None = None) -> "HandleStore":
+    def from_url(
+        cls,
+        url: str | None = None,
+        *,
+        max_state_bytes: int = DEFAULT_MAX_STATE_BYTES,
+    ) -> "HandleStore":
         """Construct from a backend URL; None selects the local SQLite default."""
         url = url or cls.DEFAULT_URL
         if url.startswith("sqlite:///"):
@@ -163,7 +178,7 @@ class HandleStore:
                 raise ValueError(
                     "Empty sqlite path. Use sqlite:///path/to.db or sqlite:///:memory:"
                 )
-            return cls(SQLiteBackend(path))
+            return cls(SQLiteBackend(path), max_state_bytes=max_state_bytes)
         if url.startswith(("redis://", "rediss://")):
             try:
                 import redis
@@ -174,7 +189,7 @@ class HandleStore:
                 ) from None
             from .backends.redis import RedisBackend
 
-            return cls(RedisBackend(redis.Redis.from_url(url)))
+            return cls(RedisBackend(redis.Redis.from_url(url)), max_state_bytes=max_state_bytes)
         raise ValueError(
             f"Unsupported backend URL {_redact(url)!r}. "
             "Supported: sqlite:///path, redis://host[:port]/db"
@@ -202,7 +217,7 @@ class HandleStore:
     def mint(
         self,
         kind: str,
-        state: dict,
+        state: dict[str, Any],
         *,
         user: str,
         ttl_days: float | None = None,
@@ -237,27 +252,36 @@ class HandleStore:
     def save(
         self,
         handle: str,
-        state: dict,
+        state: dict[str, Any],
         *,
         user: str,
         expect_version: int,
         writer: str | None = None,
+        ttl_days: float | None | _KeepTtl = KEEP_TTL,
     ) -> Snapshot:
         """Replace the state, declaring which version was read.
 
         A stale ``expect_version`` raises :class:`StaleWrite` whose payload
         carries the full current snapshot — hand it to the model to merge and
-        retry.
+        retry. ``ttl_days`` defaults to :data:`KEEP_TTL` (expiry unchanged);
+        a number renews the expiry from now, ``None`` clears it.
         """
+        if not isinstance(ttl_days, _KeepTtl):
+            ttl_days = _validate_ttl(ttl_days)
         self._check_state(state)
         current = self._load_live(user, handle)
+        now = self._clock()
+        if isinstance(ttl_days, _KeepTtl):
+            expires_at = current.expires_at
+        else:
+            expires_at = None if ttl_days is None else now + ttl_days * 86400
         new = Record(
             kind=current.kind,
             state=state,
             version=expect_version + 1,
             created_at=current.created_at,
-            updated_at=self._clock(),
-            expires_at=current.expires_at,
+            updated_at=now,
+            expires_at=expires_at,
             last_writer=writer,
         )
         if current.version != expect_version or not self._backend.cas_put(
@@ -285,6 +309,34 @@ class HandleStore:
             )
         return _snapshot(handle, new)
 
+    def _contended_write(
+        self,
+        user: str,
+        handle: str,
+        build: Callable[[Record], Record | None],
+    ) -> Snapshot:
+        """CAS retry loop for writes that are always safe to re-apply.
+
+        ``build`` derives the replacement record from the current one (or
+        returns None for a no-op). Contention re-reads and rebuilds, backing
+        off with exponential growth + full jitter to decorrelate competing
+        writers.
+        """
+        for attempt in range(_PATCH_MAX_ATTEMPTS):
+            current = self._load_live(user, handle)
+            new = build(current)
+            if new is None:
+                return _snapshot(handle, current)  # no-op: do not write
+            if self._backend.cas_put(user, handle, current.version, new):
+                return _snapshot(handle, new)
+            ceiling = min(0.1, 0.0005 * (2 ** min(attempt, 8)))
+            time.sleep(random.uniform(0, ceiling))
+        raise BackendError(
+            f"Write to '{handle}' failed after {_PATCH_MAX_ATTEMPTS} attempts under "
+            "sustained write contention.",
+            handle=handle,
+        )
+
     def patch(
         self,
         handle: str,
@@ -293,16 +345,14 @@ class HandleStore:
         user: str,
         writer: str | None = None,
     ) -> Snapshot:
-        """Apply commutative ops with no version check — they cannot conflict.
+        """Apply commutative ops with no version check — every writer's patch lands.
 
-        A CAS retry loop with backoff: contention re-reads and re-applies, so
-        concurrent patches from different sessions all land. A patch that
-        produces no change is a no-op — it does not bump the version or
-        reassign the writer, so it never steals attribution or induces a
-        spurious StaleWrite for a concurrent save.
+        A patch that produces no change is a no-op — it does not bump the
+        version or reassign the writer, so it never steals attribution or
+        induces a spurious StaleWrite for a concurrent save.
         """
-        for attempt in range(_PATCH_MAX_ATTEMPTS):
-            current = self._load_live(user, handle)
+
+        def build(current: Record) -> Record | None:
             try:
                 new_state = apply_ops(current.state, ops)
             except RecursionError:
@@ -311,9 +361,9 @@ class HandleStore:
                     reason="too_deep",
                 ) from None
             if new_state == current.state:
-                return _snapshot(handle, current)  # no-op: do not write
+                return None
             self._check_state(new_state)
-            new = Record(
+            return Record(
                 kind=current.kind,
                 state=new_state,
                 version=current.version + 1,
@@ -322,18 +372,40 @@ class HandleStore:
                 expires_at=current.expires_at,
                 last_writer=writer,
             )
-            if self._backend.cas_put(user, handle, current.version, new):
-                return _snapshot(handle, new)
-            # Lost the race. A patch is always semantically retryable, so back off
-            # with exponential growth + full jitter to decorrelate competing
-            # writers, then retry.
-            ceiling = min(0.1, 0.0005 * (2 ** min(attempt, 8)))
-            time.sleep(random.uniform(0, ceiling))
-        raise BackendError(
-            f"Patch on '{handle}' failed after {_PATCH_MAX_ATTEMPTS} attempts under "
-            "sustained write contention.",
-            handle=handle,
-        )
+
+        return self._contended_write(user, handle, build)
+
+    def touch(
+        self,
+        handle: str,
+        *,
+        user: str,
+        ttl_days: float | None,
+        writer: str | None = None,
+    ) -> Snapshot:
+        """Reset the expiry clock from now without changing the state.
+
+        A number keeps the state alive that many days from now; ``None`` makes
+        it persistent. Renewal is a real write — it bumps the version so
+        concurrent stale saves are still detected — and it retries CAS races
+        like patch, since "expire N days from now" is always safe to re-apply.
+        Expired handles cannot be revived; renew before the TTL elapses.
+        """
+        ttl_days = _validate_ttl(ttl_days)
+
+        def build(current: Record) -> Record:
+            now = self._clock()
+            return Record(
+                kind=current.kind,
+                state=current.state,
+                version=current.version + 1,
+                created_at=current.created_at,
+                updated_at=now,
+                expires_at=None if ttl_days is None else now + ttl_days * 86400,
+                last_writer=writer,
+            )
+
+        return self._contended_write(user, handle, build)
 
     def list(
         self,

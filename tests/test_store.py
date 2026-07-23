@@ -156,6 +156,63 @@ def test_sweep_removes_only_expired(store, clockbox):
     assert [i.handle for i in store.list("u", include_expired=True)] == [keep]
 
 
+# --- ttl renewal --------------------------------------------------------------
+from mcpstate.store import KEEP_TTL  # noqa: E402
+
+
+def test_touch_extends_ttl_from_now(store, clockbox):
+    h = store.mint("research", {}, user="u", ttl_days=1)
+    clockbox.now += 0.5 * 86400
+    snap = store.touch(h, user="u", ttl_days=7)
+    assert snap.expires_at.timestamp() == clockbox.now + 7 * 86400
+    clockbox.now += 6 * 86400  # would be long dead under the original TTL
+    assert store.get(h, user="u").expires_at.timestamp() == snap.expires_at.timestamp()
+
+
+def test_touch_none_clears_expiry(store, clockbox):
+    h = store.mint("note", {}, user="u", ttl_days=1)
+    snap = store.touch(h, user="u", ttl_days=None)
+    assert snap.expires_at is None
+    clockbox.now += 365 * 86400
+    assert store.get(h, user="u").expires_at is None
+
+
+def test_touch_bumps_version_and_attributes_writer(store):
+    h = store.mint("note", {"n": 1}, user="u", writer="laptop")
+    snap = store.touch(h, user="u", ttl_days=7, writer="phone")
+    assert snap.version == 2
+    assert snap.last_writer == "phone"
+    assert snap.state == {"n": 1}  # state untouched
+    with pytest.raises(StaleWrite):  # a concurrent save based on v1 now stales
+        store.save(h, {"n": 2}, user="u", expect_version=1)
+
+
+def test_touch_missing_and_expired_raise(store, clockbox):
+    with pytest.raises(HandleNotFound):
+        store.touch("note_zzzzzzzz", user="u", ttl_days=1)
+    h = store.mint("note", {}, user="u", ttl_days=1)
+    clockbox.now += 2 * 86400
+    with pytest.raises(HandleExpired):  # expired state cannot be resurrected
+        store.touch(h, user="u", ttl_days=7)
+
+
+def test_touch_validates_ttl(store):
+    h = store.mint("note", {}, user="u")
+    with pytest.raises(ValueError):
+        store.touch(h, user="u", ttl_days=-1)
+
+
+def test_save_can_renew_and_clear_ttl(store, clockbox):
+    h = store.mint("note", {}, user="u", ttl_days=1)
+    snap = store.save(h, {"x": 1}, user="u", expect_version=1, ttl_days=3)
+    assert snap.expires_at.timestamp() == clockbox.now + 3 * 86400
+    snap = store.save(h, {"x": 2}, user="u", expect_version=2, ttl_days=None)
+    assert snap.expires_at is None
+    # default: KEEP_TTL leaves whatever is stored untouched
+    snap = store.save(h, {"x": 3}, user="u", expect_version=3, ttl_days=KEEP_TTL)
+    assert snap.expires_at is None
+
+
 # --- input hardening ----------------------------------------------------------
 import datetime as _dt_mod  # noqa: E402
 

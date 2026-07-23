@@ -18,6 +18,15 @@ def test_default_url_is_home_sqlite(monkeypatch, tmp_path):
     assert (tmp_path / ".mcpstate" / "state.db").exists()
 
 
+def test_from_url_accepts_max_state_bytes(tmp_path):
+    from mcpstate import StateTooLarge
+
+    store = HandleStore.from_url(f"sqlite:///{tmp_path}/cap.db", max_state_bytes=100)
+    with pytest.raises(StateTooLarge):
+        store.mint("note", {"blob": "x" * 200}, user="u")
+    store.close()
+
+
 def test_unknown_scheme_raises():
     with pytest.raises(ValueError, match="sqlite"):
         HandleStore.from_url("postgres://nope")

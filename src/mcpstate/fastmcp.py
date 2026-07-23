@@ -8,8 +8,23 @@ from .store import HandleStore
 
 
 def store_from_env() -> HandleStore:
-    """Build a HandleStore from MCPSTATE_BACKEND (default: local SQLite)."""
-    return HandleStore.from_url(os.environ.get("MCPSTATE_BACKEND"))
+    """Build a HandleStore from MCPSTATE_BACKEND (default: local SQLite).
+
+    MCPSTATE_MAX_STATE_BYTES overrides the per-handle state size cap
+    (default 1 MiB).
+    """
+    raw_cap = os.environ.get("MCPSTATE_MAX_STATE_BYTES")
+    if raw_cap is None:
+        return HandleStore.from_url(os.environ.get("MCPSTATE_BACKEND"))
+    try:
+        cap = int(raw_cap)
+        if cap <= 0:
+            raise ValueError
+    except ValueError:
+        raise ValueError(
+            f"MCPSTATE_MAX_STATE_BYTES must be a positive integer, got {raw_cap!r}"
+        ) from None
+    return HandleStore.from_url(os.environ.get("MCPSTATE_BACKEND"), max_state_bytes=cap)
 
 
 def current_writer() -> str:

@@ -77,11 +77,98 @@ def test_list_orders_by_updated_at_desc(backend):
     assert [h for h, _ in backend.list("u")] == ["new", "old"]
 
 
+def test_sqlite_serves_many_threads_concurrently(tmp_path):
+    import threading
+
+    b = SQLiteBackend(str(tmp_path / "mt.db"))
+    b.put_new("u", "h", make_record(version=1))
+    errors = []
+
+    def reader():
+        try:
+            for _ in range(50):
+                assert b.get("u", "h") is not None
+                assert [h for h, _ in b.list("u")] == ["h"]
+        except Exception as exc:  # pragma: no cover - only on failure
+            errors.append(exc)
+
+    threads = [threading.Thread(target=reader) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    b.close()
+
+
+def test_sqlite_memory_db_is_shared_across_threads():
+    import threading
+
+    b = SQLiteBackend(":memory:")
+    b.put_new("u", "h", make_record())
+    seen = []
+    t = threading.Thread(target=lambda: seen.append(b.get("u", "h")))
+    t.start()
+    t.join()
+    assert seen == [make_record()]
+    b.close()
+
+
+def test_sqlite_memory_backends_are_isolated_from_each_other():
+    a = SQLiteBackend(":memory:")
+    b = SQLiteBackend(":memory:")
+    a.put_new("u", "h", make_record())
+    assert b.get("u", "h") is None
+    a.close()
+    b.close()
+
+
 def test_sqlite_sets_busy_timeout(tmp_path):
     b = SQLiteBackend(str(tmp_path / "t.db"))
     timeout = b._conn.execute("PRAGMA busy_timeout").fetchone()[0]
     b.close()
     assert timeout >= 5000
+
+
+def test_redis_list_prunes_dangling_index_members():
+    import fakeredis
+
+    from mcpstate.backends.redis import RedisBackend
+
+    b = RedisBackend(fakeredis.FakeRedis())
+    b.put_new("u", "note_aaaa2222", make_record())
+    # A crash between SET and SADD (or an external flush) can leave an index
+    # member with no record. list() must skip it AND prune it from the index.
+    b._r.sadd("mcpstate:i:u", "note_gone9999")
+    assert [h for h, _ in b.list("u")] == ["note_aaaa2222"]
+    assert b._r.smembers("mcpstate:i:u") == {b"note_aaaa2222"}
+    b.close()
+
+
+def test_redis_cas_put_treats_watch_error_subclasses_as_lost_race():
+    from redis.exceptions import WatchError
+
+    from mcpstate.backends.redis import RedisBackend
+
+    class CustomWatchError(WatchError):
+        """A client library may raise its own subclass; still just a lost race."""
+
+    class StubPipeline:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def watch(self, key):
+            raise CustomWatchError()
+
+    class StubClient:
+        def pipeline(self):
+            return StubPipeline()
+
+    b = RedisBackend(StubClient())
+    assert b.cas_put("u", "h", 1, make_record(version=2)) is False
 
 
 def test_redis_keys_survive_hostile_user_and_handle_strings():

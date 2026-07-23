@@ -7,12 +7,14 @@ distinction and the stale-write recovery loop.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from fastmcp import FastMCP
 
 from .errors import InternalError, McpStateError
 from .fastmcp import current_user, current_writer, store_from_env
 from .ops import get_path, op_from_dict
-from .store import HandleStore
+from .store import KEEP_TTL, HandleStore
 
 mcp = FastMCP("mcpstate")
 
@@ -31,11 +33,11 @@ def _whoami() -> str:
     return current_user(require_auth=_require_auth)
 
 
-def _fail(err: McpStateError) -> dict:
+def _fail(err: McpStateError) -> dict[str, Any]:
     return {"ok": False, "error": err.to_payload()}
 
 
-def _internal(exc: Exception) -> dict:
+def _internal(exc: Exception) -> dict[str, Any]:
     # Last-resort safety net: never leak raw exception text (it may carry
     # credentials or paths); return only the failure class name.
     return _fail(InternalError(
@@ -45,16 +47,18 @@ def _internal(exc: Exception) -> dict:
 @mcp.tool
 def state_save(
     kind: str,
-    state: dict,
+    state: dict[str, Any],
     handle: str | None = None,
     expect_version: int | None = None,
     ttl_days: float | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Persist state durably. Omit `handle` to CREATE (mints and returns a new handle —
-    remember it and pass it in later calls). Pass `handle` to UPDATE an existing state;
-    then `expect_version` is REQUIRED — pass the version you last read. If you get a
-    `stale_write` error, another session changed the state: read `error.current.state`,
-    re-apply your change on top of it, and save again with the new version."""
+    remember it and pass it in later calls); `kind` and `ttl_days` apply to the new state.
+    Pass `handle` to UPDATE an existing state; then `expect_version` is REQUIRED — pass
+    the version you last read (`kind` is ignored on update; pass `ttl_days` only to renew
+    the expiry from now, omit it to leave expiry unchanged). If you get a `stale_write`
+    error, another session changed the state: read `error.current.state`, re-apply your
+    change on top of it, and save again with the new version."""
     store = _get_store()
     user = _whoami()
     try:
@@ -72,7 +76,8 @@ def state_save(
                 },
             }
         snap = store.save(handle, state, user=user, expect_version=expect_version,
-                          writer=current_writer())
+                          writer=current_writer(),
+                          ttl_days=KEEP_TTL if ttl_days is None else ttl_days)
         return {"ok": True, "handle": handle, "version": snap.version}
     except McpStateError as err:
         return _fail(err)
@@ -81,7 +86,7 @@ def state_save(
 
 
 @mcp.tool
-def state_load(handle: str, path: str | None = None) -> dict:
+def state_load(handle: str, path: str | None = None) -> dict[str, Any]:
     """Load durable state by handle. Returns the state plus freshness metadata
     (version, updated_at, last_writer) — keep the version for your next state_save.
     For large states, pass `path` (dotted, e.g. "sources" or "profile.tags") to
@@ -100,7 +105,7 @@ def state_load(handle: str, path: str | None = None) -> dict:
 
 
 @mcp.tool
-def state_list(kind: str | None = None) -> dict:
+def state_list(kind: str | None = None) -> dict[str, Any]:
     """List this user's durable state handles (most recently updated first) with
     metadata but not full state. Use at the start of a session to offer resuming
     earlier work, e.g. 'there is a research session from yesterday'."""
@@ -117,15 +122,16 @@ def state_list(kind: str | None = None) -> dict:
 
 
 @mcp.tool
-def state_patch(handle: str, ops: list[dict]) -> dict:
-    """Apply additive mutations without version checks — they cannot conflict with
-    other sessions. Each op is one of:
+def state_patch(handle: str, ops: list[dict[str, Any]]) -> dict[str, Any]:
+    """Apply additive mutations without version checks — every session's ops land;
+    a patch never gets a stale_write. Each op is one of:
     {"op": "append", "path": "sources", "value": ...} — append to a list,
     {"op": "set_key", "path": "", "key": "k", "value": ...} — set a key in an object,
     {"op": "del_key", "path": "", "key": "k"} — remove a key,
-    {"op": "merge", "mapping": {...}} — shallow-merge into the state root.
+    {"op": "merge", "mapping": {...}, "path": ""} — shallow-merge into the object at path.
     `path` is dotted (e.g. "profile.tags"); "" means the state root.
-    Prefer patch over save for adding items — it never gets a stale_write."""
+    Prefer patch over save for adding items. Caveat: append is fully conflict-free,
+    but if two sessions set_key/merge the SAME key, the later write wins that key."""
     try:
         parsed = [op_from_dict(o) for o in ops]
         snap = _get_store().patch(handle, parsed, user=_whoami(), writer=current_writer())
@@ -137,7 +143,23 @@ def state_patch(handle: str, ops: list[dict]) -> dict:
 
 
 @mcp.tool
-def state_delete(handle: str) -> dict:
+def state_touch(handle: str, ttl_days: float | None = None) -> dict[str, Any]:
+    """Reset a handle's expiry clock without changing its state. Pass `ttl_days` to
+    keep the state alive that many days from now — renew BEFORE it expires; an
+    expired handle cannot be revived. Omit `ttl_days` to make the state persistent
+    (never expire). Returns fresh metadata including the new expires_at and version."""
+    try:
+        snap = _get_store().touch(handle, user=_whoami(), ttl_days=ttl_days,
+                                  writer=current_writer())
+        return {"ok": True, **snap.to_dict()}
+    except McpStateError as err:
+        return _fail(err)
+    except Exception as exc:  # safety net: keep the agent-legible contract
+        return _internal(exc)
+
+
+@mcp.tool
+def state_delete(handle: str) -> dict[str, Any]:
     """Permanently delete durable state. Only do this when the user asks or the
     work it tracks is truly finished."""
     try:

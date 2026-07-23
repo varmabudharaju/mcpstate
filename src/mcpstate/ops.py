@@ -41,15 +41,16 @@ class DelKey:
 
 @dataclass(frozen=True)
 class Merge:
-    """Shallow-merge ``mapping`` into the state root."""
+    """Shallow-merge ``mapping`` into the object at ``path`` (default: the state root)."""
 
-    mapping: dict
+    mapping: dict[str, Any]
+    path: str = ""
 
 
 PatchOp = Union[Append, SetKey, DelKey, Merge]
 
 
-def _resolve(state: dict, path: str, op_name: str) -> Any:
+def _resolve(state: dict[str, Any], path: str, op_name: str) -> Any:
     node: Any = state
     if path == "":
         return node
@@ -66,7 +67,7 @@ def _resolve(state: dict, path: str, op_name: str) -> Any:
     return node
 
 
-def _apply_one(state: dict, op: PatchOp) -> None:
+def _apply_one(state: dict[str, Any], op: PatchOp) -> None:
     if isinstance(op, Append):
         target = _resolve(state, op.path, "append")
         if not isinstance(target, list):
@@ -104,17 +105,25 @@ def _apply_one(state: dict, op: PatchOp) -> None:
                 op="merge",
                 reason="expected_object",
             )
-        state.update(op.mapping)
+        target = _resolve(state, op.path, "merge")
+        if not isinstance(target, dict):
+            raise PatchError(
+                f"Path '{op.path}' holds a {type(target).__name__}, but merge needs an object.",
+                op="merge",
+                path=op.path,
+                reason="expected_object",
+            )
+        target.update(op.mapping)
     else:  # pragma: no cover - defensive
         raise PatchError(f"Unknown op {op!r}", op=str(op), reason="unknown_op")
 
 
-def get_path(state: dict, path: str) -> Any:
+def get_path(state: dict[str, Any], path: str) -> Any:
     """Select the subtree at a dotted ``path`` (``""`` returns the whole state)."""
     return _resolve(state, path, "load")
 
 
-def apply_ops(state: dict, ops: Sequence[PatchOp]) -> dict:
+def apply_ops(state: dict[str, Any], ops: Sequence[PatchOp]) -> dict[str, Any]:
     """Return a new state with every op applied. The input is never mutated."""
     out = copy.deepcopy(state)
     for op in ops:
@@ -122,7 +131,7 @@ def apply_ops(state: dict, ops: Sequence[PatchOp]) -> dict:
     return out
 
 
-def _require(value: object, typ: tuple, field: str, op_name: str) -> None:
+def _require(value: object, typ: tuple[type, ...], field: str, op_name: str) -> None:
     if not isinstance(value, typ) or isinstance(value, bool) and bool not in typ:
         names = " or ".join(t.__name__ for t in typ)
         raise PatchError(
@@ -132,7 +141,7 @@ def _require(value: object, typ: tuple, field: str, op_name: str) -> None:
         )
 
 
-def op_from_dict(d: dict) -> PatchOp:
+def op_from_dict(d: dict[str, Any]) -> PatchOp:
     """Parse the wire form used by the flagship server's state_patch tool."""
     if not isinstance(d, dict):
         raise PatchError(
@@ -154,7 +163,9 @@ def op_from_dict(d: dict) -> PatchOp:
             return DelKey(d["path"], d["key"])
         if kind == "merge":
             _require(d["mapping"], (dict,), "mapping", "merge")
-            return Merge(d["mapping"])
+            path = d.get("path", "")
+            _require(path, (str,), "path", "merge")
+            return Merge(d["mapping"], path)
     except KeyError as missing:
         raise PatchError(
             f"Op '{kind}' is missing required field {missing}.",

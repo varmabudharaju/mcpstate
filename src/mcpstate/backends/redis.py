@@ -92,13 +92,14 @@ class RedisBackend:
                 return True
             except Exception as exc:
                 # WatchError means a concurrent write landed first: the CAS loses.
-                # Caught by name so this module imports without the redis package.
-                if type(exc).__name__ == "WatchError":
+                # Detected by name anywhere in the MRO (covers subclasses) so this
+                # module works with any injected client, redis package or not.
+                if any(c.__name__ == "WatchError" for c in type(exc).__mro__):
                     return False
                 raise
 
     def delete(self, user: str, handle: str) -> bool:
-        removed = self._r.delete(_key(user, handle)) == 1
+        removed = bool(self._r.delete(_key(user, handle)) == 1)
         self._r.srem(_index(user), handle)
         return removed
 
@@ -106,11 +107,18 @@ class RedisBackend:
         handles = [
             h.decode() if isinstance(h, bytes) else h for h in self._r.smembers(_index(user))
         ]
+        if not handles:
+            return []
+        raws = self._r.mget([_key(user, h) for h in handles])
         out = []
-        for handle in handles:
-            raw = self._r.get(_key(user, handle))
-            if raw is not None:
+        dangling = []  # index members whose record is gone (crash between SET and SADD)
+        for handle, raw in zip(handles, raws):
+            if raw is None:
+                dangling.append(handle)
+            else:
                 out.append((handle, _load(raw)))
+        if dangling:
+            self._r.srem(_index(user), *dangling)
         out.sort(key=lambda pair: pair[1].updated_at, reverse=True)
         return out
 
